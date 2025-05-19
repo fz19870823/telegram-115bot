@@ -203,10 +203,13 @@ async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     failure_messages.append(f"\n❌ 失败链接: {task['url']}\n错误信息: {task.get('message', '未知错误')}")
 
+            # 检查消息长度并分段发送
             if success_messages:
-                await update.message.reply_text("✅ 以下任务添加成功：" + "\n".join(success_messages))
+                success_text = "✅ 以下任务添加成功：" + "\n".join(success_messages)
+                await send_long_message(update, context, success_text)
             if failure_messages:
-                await update.message.reply_text("❌ 以下任务添加失败：" + "\n".join(failure_messages))
+                failure_text = "❌ 以下任务添加失败：" + "\n".join(failure_messages)
+                await send_long_message(update, context, failure_text)
         else:
             error_msg = result.get("message") or result.get("error") or "添加任务失败，未知错误。"
             print(result)
@@ -214,6 +217,16 @@ async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logging.error(traceback.format_exc())
         await update.message.reply_text("❌ 添加任务时发生内部错误。")
+
+# 新增函数：分段发送长消息
+async def send_long_message(update, context, message):
+    MAX_LENGTH = 4096
+    if len(message) > MAX_LENGTH:
+        chunks = [message[i:i+MAX_LENGTH] for i in range(0, len(message), MAX_LENGTH)]
+        for chunk in chunks:
+            await update.message.reply_text(chunk)
+    else:
+        await update.message.reply_text(message)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Executing: start")
