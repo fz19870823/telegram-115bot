@@ -91,6 +91,38 @@ docker-compose up -d
 
 ---
 
+# 📄 config.ini 配置说明
+
+该文件用于配置 Telegram 115 Bot 的基本参数。
+
+---
+
+## ✏️ 配置示例
+
+```ini
+[telegram]
+token = YOUR_BOT_TOKEN_HERE
+```
+
+---
+
+## 参数说明
+
+| 参数名 | 描述 |
+|--------|------|
+| `token` | Telegram Bot 的访问令牌（从 BotFather 获取）。将 `YOUR_BOT_TOKEN_HERE` 替换为你自己的 token。 |
+
+---
+
+## 🚨 注意事项
+
+- **请妥善保管 `token`，不要泄露给他人。**
+- 若配置文件路径变动，请同步更新 `docker-compose.yml` 中的挂载路径。
+
+
+
+
+
 ## 📬 联系与支持
 
 如有疑问或建议，请提交 issue 或联系维护者。
