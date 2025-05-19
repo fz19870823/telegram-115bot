@@ -1,6 +1,6 @@
 import os  
 import configparser
-import re
+
 import sys
 import time
 import aiohttp
@@ -103,17 +103,17 @@ async def refresh_access_token(refresh_token):
         async with aiohttp.ClientSession() as session:
             async with session.post(API_REFRESH_URL, data=data, headers=headers) as resp:
                 if resp.status != 200:
+                    logging.error(f"刷新access_token请求失败，状态码: {resp.status}")
                     return None, f"刷新access_token请求失败，状态码: {resp.status}"
                 resp_json = await resp.json()
-                # print(resp_json)
-                # 修改判断逻辑，确保只有在返回值中包含 access_token 和 expires_in 时才认为成功
                 if "access_token" in resp_json.get("data", {}) and "expires_in" in resp_json.get("data", {}):
                     return resp_json.get("data"), None
                 else:
                     error_msg = resp_json.get("error") or resp_json.get("message") or resp_json.get("errno")
+                    logging.error(f"刷新access_token失败: {error_msg}")
                     return None, f"刷新access_token失败: {error_msg}"
     except Exception as e:
-        logging.error(traceback.format_exc())
+        logging.error(f"刷新access_token时发生异常: {e}")
         return None, "刷新access_token时发生异常"
 
 async def check_and_get_access_token(user_id, context):
@@ -184,7 +184,7 @@ async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("未检测到有效的下载链接，请发送支持的磁力链（magnet）或电驴链接（ed2k）。")
             return
 
-        cid = load_user_cid(user_id) or "0"  # 使用用户设置的CID，如果没有则使用默认值"0"
+        cid = load_user_cid(user_id) or "0"
         success, result = await add_cloud_download_task(access_token, links, cid)
         if success:
             tasks = result.get("data", [])
@@ -203,7 +203,6 @@ async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     failure_messages.append(f"\n❌ 失败链接: {task['url']}\n错误信息: {task.get('message', '未知错误')}")
 
-            # 检查消息长度并分段发送
             if success_messages:
                 success_text = "✅ 以下任务添加成功：" + "\n".join(success_messages)
                 await send_long_message(update, context, success_text)
@@ -212,10 +211,10 @@ async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await send_long_message(update, context, failure_text)
         else:
             error_msg = result.get("message") or result.get("error") or "添加任务失败，未知错误。"
-            print(result)
+            logging.error(f"添加任务失败: {error_msg}")
             await update.message.reply_text(f"❌ 添加任务失败：{error_msg}")
-    except Exception:
-        logging.error(traceback.format_exc())
+    except Exception as e:
+        logging.error(f"添加任务时发生内部错误: {e}")
         await update.message.reply_text("❌ 添加任务时发生内部错误。")
 
 # 新增函数：分段发送长消息
