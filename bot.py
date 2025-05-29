@@ -247,14 +247,8 @@ async def save_refresh_token(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(f"刷新access_token失败：{err}，请确认refresh_token是否正确。")
             return ConversationHandler.END
 
+        # 保存新的 access_token 和 refresh_token（使用接口返回的新 token）
         save_user_tokens(user_id, data['access_token'], data['refresh_token'], data['expires_in'])
-
-        config = read_config()
-        section = f"user_{user_id}"
-        if section not in config:
-            config[section] = {}
-        config[section]['refresh_token'] = refresh_token
-        write_config(config)
 
         await update.message.reply_text("refresh_token 和 access_token 已保存。")
         return ConversationHandler.END
@@ -262,6 +256,7 @@ async def save_refresh_token(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logging.error(traceback.format_exc())
         await update.message.reply_text("保存 refresh_token 时发生错误。")
         return ConversationHandler.END
+
 
 async def ask_cid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Executing: ask_cid")
