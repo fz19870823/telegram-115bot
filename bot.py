@@ -1,3 +1,4 @@
+import datetime
 import os  
 import configparser
 
@@ -21,7 +22,7 @@ API_REFRESH_URL = "https://passportapi.115.com/open/refreshToken"
 API_ADD_TASK_URL = "https://proapi.115.com/open/offline/add_task_urls"
 
 def get_bot_token():
-    print("Executing: get_bot_token")
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: get_bot_token")
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if token:
         return token
@@ -32,23 +33,23 @@ def get_bot_token():
         if 'telegram' in config and 'token' in config['telegram']:
             return config['telegram']['token']
 
-    print("未找到 TELEGRAM_BOT_TOKEN 环境变量，且 config.ini 中也无 token。", file=sys.stderr)
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 未找到 TELEGRAM_BOT_TOKEN 环境变量，且 config.ini 中也无 token。", file=sys.stderr)
     sys.exit(1)
 
 def read_config():
-    print("Executing: read_config")
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: read_config")
     config = configparser.ConfigParser()
     if os.path.exists(CONFIG_FILE):
         config.read(CONFIG_FILE)
     return config
 
 def write_config(config):
-    print("Executing: write_config")
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: write_config")
     with open(CONFIG_FILE, 'w') as f:
         config.write(f)
 
 def load_user_tokens(user_id):
-    print("Executing: load_user_tokens")
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: load_user_tokens")
     config = read_config()
     section = f"user_{user_id}"
     if section not in config:
@@ -60,7 +61,7 @@ def load_user_tokens(user_id):
     }
 
 def save_user_tokens(user_id, access_token, refresh_token, expires_in):
-    print("Executing: save_user_tokens")
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: save_user_tokens")
     config = read_config()
     section = f"user_{user_id}"
     if section not in config:
@@ -74,7 +75,7 @@ def save_user_tokens(user_id, access_token, refresh_token, expires_in):
     write_config(config)
 
 def load_user_cid(user_id):
-    print("Executing: load_user_cid")
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: load_user_cid")
     config = read_config()
     section = f"user_{user_id}"
     if section not in config:
@@ -82,7 +83,7 @@ def load_user_cid(user_id):
     return config[section].get("cid")
 
 def save_user_cid(user_id, cid):
-    print("Executing: save_user_cid")
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: save_user_cid")
     config = read_config()
     section = f"user_{user_id}"
     if section not in config:
@@ -95,7 +96,7 @@ def extract_links(text):
     return text.strip().split('\n')
 
 async def refresh_access_token(refresh_token):
-    print("Executing: refresh_access_token")
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: refresh_access_token")
     data = {"refresh_token": refresh_token}
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
@@ -172,7 +173,7 @@ async def add_cloud_download_task(access_token, urls, wp_path_id="0"):
         return False, {"error": "请求过程中发生异常"}
 
 async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Executing: handle_add_task")
+    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: handle_add_task")
     try:
         user_id = str(update.effective_user.id)
         access_token = await check_and_get_access_token(user_id, context)
