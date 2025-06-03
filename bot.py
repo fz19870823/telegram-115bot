@@ -283,12 +283,23 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("已取消设置 refresh_token。")
     return ConversationHandler.END
 
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    处理 /status 命令，返回用户 ID 和设定的 CID。
+    如果未设定 CID，则返回默认值 0。
+    """
+    user_id = str(update.effective_user.id)
+    cid = load_user_cid(user_id) or "0"
+    response_text = f"👤 用户 ID: {user_id}\n📁 CID: {cid}"
+    await update.message.reply_text(response_text)
+
 async def setup_commands(app):
     print("Executing: setup_commands")
     await app.bot.set_my_commands([
         BotCommand(command="start", description="开始与机器人交互"),
         BotCommand(command="set_refresh_token", description="设置 115 的 refresh_token"),
-        BotCommand(command="set_cid", description="设置 115 的 CID")
+        BotCommand(command="set_cid", description="设置 115 的 CID"),
+        BotCommand(command="status", description="查看用户状态（包括用户 ID 和 CID）")  # 新增 status 命令
     ])
 
 def main():
@@ -309,6 +320,7 @@ def main():
     )
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("status", status))  # 注册 status 命令处理器
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_task))
 
