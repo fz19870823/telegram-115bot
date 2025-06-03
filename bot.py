@@ -230,7 +230,22 @@ async def send_long_message(update, context, message):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Executing: start")
-    await update.message.reply_text('你好，我是你的机器人！请发送磁力链接（magnet）或电驴链接（ed2k）进行识别。')
+    user_id = str(update.effective_user.id)
+    config = read_config()
+    section = f"user_{user_id}"
+
+    # 检查用户是否已存在于配置文件中
+    if section in config:
+        await update.message.reply_text('你好，我是你的机器人！请发送磁力链接（magnet）或电驴链接（ed2k）进行识别。')
+    else:
+        # 用户不存在于配置文件中，保存用户信息并回复提示
+        save_user_cid(user_id, "0")  # 保存用户 CID 默认值为 0
+        response_text = (
+            '你好，我是你的机器人！请发送磁力链接（magnet）或电驴链接（ed2k）进行识别。\n'
+            f'👤 用户 ID: {user_id}\n'
+            f'📁 CID: 0（默认值）'
+        )
+        await update.message.reply_text(response_text)
 
 async def ask_refresh_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Executing: ask_refresh_token")
