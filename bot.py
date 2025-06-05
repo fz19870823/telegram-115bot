@@ -193,19 +193,15 @@ async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("未检测到任何任务信息。")
                 return
 
-            success_messages = []
+            success_count = sum(1 for task in tasks if task.get("state", False))
             failure_messages = []
 
             for task in tasks:
-                if task.get("state", False):
-                    status = task.get("state", "未知状态")
-                    infohash = task.get("info_hash", "无")
-                    success_messages.append(f"\n🔗 链接: {task['url']}\n📦 状态: {status}\n🔑 Hash: {infohash}")
-                else:
+                if not task.get("state", False):
                     failure_messages.append(f"\n❌ 失败链接: {task['url']}\n错误信息: {task.get('message', '未知错误')}")
 
-            if success_messages:
-                success_text = "✅ 以下任务添加成功：" + "\n".join(success_messages)
+            if success_count > 0:
+                success_text = f"✅ 成功添加 {success_count} 个任务。"
                 await send_long_message(update, context, success_text)
             if failure_messages:
                 failure_text = "❌ 以下任务添加失败：" + "\n".join(failure_messages)
