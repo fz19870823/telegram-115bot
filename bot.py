@@ -9,16 +9,16 @@ from telegram import Update, BotCommand
 from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler, filters,
                           ContextTypes, ConversationHandler)
 
-# 修改：新增日志文件路径
-LOG_FILE = 'bot.log'
+# 修改：明确指定日志文件路径
+LOG_FILE = os.path.join(os.path.dirname(__file__), 'bot.log')
 
-# 修改：设置日志，同时输出到文件和控制台
+# 修改：设置日志，将所有日志合并到一个文件中
 logging.basicConfig(
-    level=logging.ERROR,
+    level=logging.INFO,
     format='%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s',  # 增加毫秒精度
     datefmt='%Y-%m-%d %H:%M:%S',  # 指定日期时间格式
     handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8'),  # 输出到文件
+        logging.FileHandler(LOG_FILE, encoding='utf-8'),  # 存储所有级别的日志
         logging.StreamHandler(sys.stdout)  # 输出到控制台
     ]
 )
@@ -147,7 +147,7 @@ async def check_and_get_access_token(user_id, context):
         save_user_tokens(user_id, data['access_token'], data['refresh_token'], data['expires_in'])
         return data['access_token']
     except Exception as e:
-        logging.error(traceback.format_exc())
+        logging.error(f"检查和获取 access_token 时发生异常: {str(e)}")  # 仅记录错误信息，不包含堆栈
         return None
 
 async def add_cloud_download_task(access_token, urls, wp_path_id="0"):
@@ -167,11 +167,8 @@ async def add_cloud_download_task(access_token, urls, wp_path_id="0"):
                     # 修改：返回完整的响应内容
                     resp_json = await resp.json()
                     return False, resp_json
-                try:
-                    resp_json = await resp.json()
-                except:
-                    print(await resp.text())
-                    # sys.exit(0)
+                
+                resp_json = await resp.json()  # 仅调用一次
                 if resp_json.get("state") is True and resp_json.get("code") == 0:
                     return True, resp_json
                 else:
@@ -211,8 +208,10 @@ async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if success_count > 0:
                 success_text = f"✅ 成功添加 {success_count} 个任务。"
+                if failure_messages:
+                    success_text += "\n以下任务添加失败：" + "\n".join(failure_messages)
                 await send_long_message(update, context, success_text)
-            if failure_messages:
+            elif failure_messages:
                 failure_text = "❌ 以下任务添加失败：" + "\n".join(failure_messages)
                 await send_long_message(update, context, failure_text)
         else:
@@ -409,3 +408,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
