@@ -313,13 +313,73 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response_text = f"👤 用户 ID: {user_id}\n📁 CID: {cid}"
     await update.message.reply_text(response_text)
 
+async def get_quota_info(access_token):
+    logging.info("Executing: get_quota_info")
+    url = "https://proapi.115.com/open/offline/get_quota_info"
+    headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status != 200:
+                    logging.error(f"获取配额信息失败，状态码: {resp.status}")
+                    return None, f"获取配额信息失败，状态码: {resp.status}"
+                resp_json = await resp.json()
+                if resp_json.get("state") is True and resp_json.get("code") == 0:
+                    return resp_json.get("data"), None
+                else:
+                    error_msg = resp_json.get("message") or resp_json.get("error") or "获取配额信息失败，未知错误。"
+                    logging.error(f"获取配额信息失败: {error_msg}")
+                    return None, error_msg
+    except Exception as e:
+        logging.error(f"获取配额信息时发生异常: {e}")
+        return None, "获取配额信息时发生异常"
+
+async def handle_quota(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logging.info("Executing: handle_quota")
+    try:
+        user_id = str(update.effective_user.id)
+        access_token = await check_and_get_access_token(user_id, context)
+        if not access_token:
+            return
+
+        quota_data, err = await get_quota_info(access_token)
+        if err:
+            await update.message.reply_text(f"❌ 获取配额信息失败：{err}")
+            return
+
+        # 格式化配额信息
+        formatted_quota = "📊 **配额信息**\n\n"
+        formatted_quota += f"总配额: {quota_data.get('count', 0)}\n"
+        formatted_quota += f"已用配额: {quota_data.get('used', 0)}\n"
+        formatted_quota += f"剩余配额: {quota_data.get('surplus', 0)}\n\n"
+
+        for package in quota_data.get("package", []):
+            formatted_quota += f"📦 **{package.get('name', '未知类型')}**\n"
+            formatted_quota += f"  - 总配额: {package.get('count', 0)}\n"
+            formatted_quota += f"  - 已用配额: {package.get('used', 0)}\n"
+            formatted_quota += f"  - 剩余配额: {package.get('surplus', 0)}\n"
+            formatted_quota += f"  - 明细项过期信息:\n"
+            for expire_info in package.get("expire_info", []):
+                formatted_quota += f"    - 剩余配额: {expire_info.get('surplus', 0)}\n"
+                formatted_quota += f"    - 过期时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expire_info.get('expire_time', 0)))}\n"
+            formatted_quota += "\n"
+
+        await send_long_message(update, context, formatted_quota)
+    except Exception as e:
+        logging.error(f"获取配额信息时发生内部错误: {e}")
+        await update.message.reply_text("❌ 获取配额信息时发生内部错误。")
+
 async def setup_commands(app):
     logging.info("Executing: setup_commands")
     await app.bot.set_my_commands([
         BotCommand(command="start", description="开始与机器人交互"),
         BotCommand(command="set_refresh_token", description="设置 115 的 refresh_token"),
         BotCommand(command="set_cid", description="设置 115 的 CID"),
-        BotCommand(command="status", description="查看用户状态（包括用户 ID 和 CID）")  # 新增 status 命令
+        BotCommand(command="status", description="查看用户状态（包括用户 ID 和 CID）"),
+        BotCommand(command="quota", description="查看离线任务配额信息")
     ])
 
 def main():
@@ -340,7 +400,8 @@ def main():
     )
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("status", status))  # 注册 status 命令处理器
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("quota", handle_quota))  # 注册 quota 命令处理器
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_task))
 
