@@ -1,7 +1,5 @@
-import datetime
 import os  
 import configparser
-
 import sys
 import time
 import aiohttp
@@ -11,8 +9,19 @@ from telegram import Update, BotCommand
 from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler, filters,
                           ContextTypes, ConversationHandler)
 
-# 设置日志
-logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+# 修改：新增日志文件路径
+LOG_FILE = 'bot.log'
+
+# 修改：设置日志，同时输出到文件和控制台
+logging.basicConfig(
+    level=logging.ERROR,
+    format='%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s',  # 增加毫秒精度
+    datefmt='%Y-%m-%d %H:%M:%S',  # 指定日期时间格式
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding='utf-8'),  # 输出到文件
+        logging.StreamHandler(sys.stdout)  # 输出到控制台
+    ]
+)
 
 CONFIG_FILE = 'config.ini'
 ASK_REFRESH_TOKEN = 1
@@ -22,7 +31,7 @@ API_REFRESH_URL = "https://passportapi.115.com/open/refreshToken"
 API_ADD_TASK_URL = "https://proapi.115.com/open/offline/add_task_urls"
 
 def get_bot_token():
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: get_bot_token")
+    logging.info("Executing: get_bot_token")
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if token:
         return token
@@ -33,23 +42,23 @@ def get_bot_token():
         if 'telegram' in config and 'token' in config['telegram']:
             return config['telegram']['token']
 
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 未找到 TELEGRAM_BOT_TOKEN 环境变量，且 config.ini 中也无 token。", file=sys.stderr)
+    logging.error("未找到 TELEGRAM_BOT_TOKEN 环境变量，且 config.ini 中也无 token。")
     sys.exit(1)
 
 def read_config():
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: read_config")
+    logging.info("Executing: read_config")
     config = configparser.ConfigParser()
     if os.path.exists(CONFIG_FILE):
         config.read(CONFIG_FILE)
     return config
 
 def write_config(config):
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: write_config")
+    logging.info("Executing: write_config")
     with open(CONFIG_FILE, 'w') as f:
         config.write(f)
 
 def load_user_tokens(user_id):
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: load_user_tokens")
+    logging.info("Executing: load_user_tokens")
     config = read_config()
     section = f"user_{user_id}"
     if section not in config:
@@ -61,7 +70,7 @@ def load_user_tokens(user_id):
     }
 
 def save_user_tokens(user_id, access_token, refresh_token, expires_in):
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: save_user_tokens")
+    logging.info("Executing: save_user_tokens")
     config = read_config()
     section = f"user_{user_id}"
     if section not in config:
@@ -75,7 +84,7 @@ def save_user_tokens(user_id, access_token, refresh_token, expires_in):
     write_config(config)
 
 def load_user_cid(user_id):
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: load_user_cid")
+    logging.info("Executing: load_user_cid")
     config = read_config()
     section = f"user_{user_id}"
     if section not in config:
@@ -83,7 +92,7 @@ def load_user_cid(user_id):
     return config[section].get("cid")
 
 def save_user_cid(user_id, cid):
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: save_user_cid")
+    logging.info("Executing: save_user_cid")
     config = read_config()
     section = f"user_{user_id}"
     if section not in config:
@@ -92,11 +101,11 @@ def save_user_cid(user_id, cid):
     write_config(config)
 
 def extract_links(text):
-    print("Executing: extract_links")
+    logging.info("Executing: extract_links")
     return text.strip().split('\n')
 
 async def refresh_access_token(refresh_token):
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: refresh_access_token")
+    logging.info("Executing: refresh_access_token")
     data = {"refresh_token": refresh_token}
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
@@ -118,7 +127,7 @@ async def refresh_access_token(refresh_token):
         return None, "刷新access_token时发生异常"
 
 async def check_and_get_access_token(user_id, context):
-    print("Executing: check_and_get_access_token")
+    logging.info("Executing: check_and_get_access_token")
     try:
         tokens = load_user_tokens(user_id)
         if not tokens or not tokens.get("refresh_token"):
@@ -142,7 +151,7 @@ async def check_and_get_access_token(user_id, context):
         return None
 
 async def add_cloud_download_task(access_token, urls, wp_path_id="0"):
-    print("Executing: add_cloud_download_task")
+    logging.info("Executing: add_cloud_download_task")
     payload = {
         "urls": "\n".join(urls),
         "wp_path_id": wp_path_id
@@ -173,7 +182,7 @@ async def add_cloud_download_task(access_token, urls, wp_path_id="0"):
         return False, {"error": "请求过程中发生异常"}
 
 async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Executing: handle_add_task")
+    logging.info("Executing: handle_add_task")
     try:
         user_id = str(update.effective_user.id)
         access_token = await check_and_get_access_token(user_id, context)
@@ -225,7 +234,7 @@ async def send_long_message(update, context, message):
         await update.message.reply_text(message)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Executing: start")
+    logging.info("Executing: start")
     user_id = str(update.effective_user.id)
     config = read_config()
     section = f"user_{user_id}"
@@ -244,12 +253,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(response_text)
 
 async def ask_refresh_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Executing: ask_refresh_token")
+    logging.info("Executing: ask_refresh_token")
     await update.message.reply_text("请输入你的 115 refresh_token：")
     return ASK_REFRESH_TOKEN
 
 async def save_refresh_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Executing: save_refresh_token")
+    logging.info("Executing: save_refresh_token")
     refresh_token = update.message.text.strip()
     user_id = str(update.effective_user.id)
 
@@ -271,12 +280,12 @@ async def save_refresh_token(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def ask_cid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Executing: ask_cid")
+    logging.info("Executing: ask_cid")
     await update.message.reply_text("请输入你的 115 CID：")
     return ASK_CID
 
 async def save_cid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Executing: save_cid")
+    logging.info("Executing: save_cid")
     cid = update.message.text.strip()
     user_id = str(update.effective_user.id)
 
@@ -290,7 +299,7 @@ async def save_cid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Executing: cancel")
+    logging.info("Executing: cancel")
     await update.message.reply_text("已取消设置 refresh_token。")
     return ConversationHandler.END
 
@@ -305,7 +314,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response_text)
 
 async def setup_commands(app):
-    print("Executing: setup_commands")
+    logging.info("Executing: setup_commands")
     await app.bot.set_my_commands([
         BotCommand(command="start", description="开始与机器人交互"),
         BotCommand(command="set_refresh_token", description="设置 115 的 refresh_token"),
@@ -314,7 +323,7 @@ async def setup_commands(app):
     ])
 
 def main():
-    print("Executing: main")
+    logging.info("Executing: main")
     token = get_bot_token()
     app = ApplicationBuilder().token(token).post_init(setup_commands).build()
 
