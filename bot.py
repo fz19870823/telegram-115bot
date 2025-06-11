@@ -320,10 +320,21 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if tokens["access_token"] and tokens["access_token_expire_at"] > now:
         access_token_valid = True
 
+    # 如果 access_token 无效，尝试刷新
+    if not access_token_valid:
+        data, err = await refresh_access_token(tokens["refresh_token"])
+        if err:
+            await update.message.reply_text(f"刷新 access_token 失败：{err}")
+            return
+
+        # 更新 access_token 和 refresh_token
+        save_user_tokens(user_id, data['access_token'], data['refresh_token'], data['expires_in'])
+        tokens = load_user_tokens(user_id)
+
     response_text = (
         f"👤 用户 ID: {user_id}\n"
         f"📁 CID: {cid}\n"
-        f"🔑 Access Token: {'有效' if access_token_valid else '无效'}\n"
+        f"🔑 Access Token: {tokens['access_token']}\n"
         f"🔄 Refresh Token: {tokens['refresh_token']}"
     )
     await update.message.reply_text(response_text)
