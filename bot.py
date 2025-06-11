@@ -365,6 +365,13 @@ async def handle_quota(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ 获取配额信息失败：{err}")
             return
 
+        # 预处理配额数据，防止出现 None 的情况
+        quota_data = quota_data or {}
+        quota_data.setdefault('count', 0)
+        quota_data.setdefault('used', 0)
+        quota_data.setdefault('surplus', 0)
+        quota_data.setdefault('package', [])
+
         # 格式化配额信息
         formatted_quota = "📊 **配额信息**\n\n"
         formatted_quota += f"总配额: {quota_data.get('count', 0)}\n"
@@ -372,14 +379,34 @@ async def handle_quota(update: Update, context: ContextTypes.DEFAULT_TYPE):
         formatted_quota += f"剩余配额: {quota_data.get('surplus', 0)}\n\n"
 
         for package in quota_data.get("package", []):
+            package = package or {}
+            package.setdefault('name', '未知类型')
+            package.setdefault('count', 0)
+            package.setdefault('used', 0)
+            package.setdefault('surplus', 0)
+            package.setdefault('expire_info', [])
+
             formatted_quota += f"📦 **{package.get('name', '未知类型')}**\n"
             formatted_quota += f"  - 总配额: {package.get('count', 0)}\n"
             formatted_quota += f"  - 已用配额: {package.get('used', 0)}\n"
             formatted_quota += f"  - 剩余配额: {package.get('surplus', 0)}\n"
             formatted_quota += f"  - 明细项过期信息:\n"
-            for expire_info in package.get("expire_info", []):
-                formatted_quota += f"    - 剩余配额: {expire_info.get('surplus', 0)}\n"
-                formatted_quota += f"    - 过期时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expire_info.get('expire_time', 0)))}\n"
+
+            expire_info_list = package.get("expire_info", [])
+            if not expire_info_list:
+                formatted_quota += "    - 无过期信息\n"
+            else:
+                for expire_info in expire_info_list:
+                    expire_info = expire_info or {}
+                    expire_info.setdefault('surplus', 0)
+                    expire_info.setdefault('expire_time', 0)
+
+                    formatted_quota += f"    - 剩余配额: {expire_info.get('surplus', 0)}\n"
+                    expire_time = expire_info.get('expire_time', 0)
+                    if expire_time > 0:
+                        formatted_quota += f"    - 过期时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expire_time))}\n"
+                    else:
+                        formatted_quota += "    - 过期时间: 未知\n"
             formatted_quota += "\n"
 
         await send_long_message(update, context, formatted_quota)
