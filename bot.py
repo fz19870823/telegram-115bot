@@ -371,6 +371,36 @@ async def handle_quota(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"获取配额信息时发生内部错误: {e}")
         await update.message.reply_text("❌ 获取配额信息时发生内部错误。")
 
+async def handle_access_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    处理 /access_token 命令，刷新 access_token 并返回其有效期。
+    """
+    logging.info("Executing: handle_access_token")
+    user_id = str(update.effective_user.id)
+    tokens = load_user_tokens(user_id)
+
+    if not tokens or not tokens.get("refresh_token"):
+        await update.message.reply_text("你还没有保存 115 的 refresh_token，请先通过 /set_refresh_token 设置。")
+        return
+
+    now = int(time.time())
+    if tokens["access_token"] and tokens["access_token_expire_at"] > now:
+        # access_token 未过期，直接返回现有 token 和过期时间
+        expire_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(tokens["access_token_expire_at"]))
+        await update.message.reply_text(f"当前 access_token 未过期，有效期至: {expire_time}")
+        return
+
+    # access_token 已过期，调用 refresh_access_token 获取新的 token
+    data, err = await refresh_access_token(tokens["refresh_token"])
+    if err:
+        await update.message.reply_text(f"刷新 access_token 失败：{err}")
+        return
+
+    # 保存新的 access_token 和 refresh_token
+    save_user_tokens(user_id, data['access_token'], data['refresh_token'], data['expires_in'])
+    expire_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(tokens["access_token_expire_at"] + int(data['expires_in'])))
+    await update.message.reply_text(f"已刷新 access_token，有效期至: {expire_time}")
+
 async def setup_commands(app):
     logging.info("Executing: setup_commands")
     await app.bot.set_my_commands([
@@ -378,7 +408,8 @@ async def setup_commands(app):
         BotCommand(command="set_refresh_token", description="设置 115 的 refresh_token"),
         BotCommand(command="set_cid", description="设置 115 的 CID"),
         BotCommand(command="status", description="查看用户状态（包括用户 ID 和 CID）"),
-        BotCommand(command="quota", description="查看离线任务配额信息")
+        BotCommand(command="quota", description="查看离线任务配额信息"),
+        BotCommand(command="access_token", description="刷新 access_token 并返回有效期")  # 修改命令描述
     ])
 
 def main():
@@ -400,7 +431,8 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
-    app.add_handler(CommandHandler("quota", handle_quota))  # 注册 quota 命令处理器
+    app.add_handler(CommandHandler("quota", handle_quota))
+    app.add_handler(CommandHandler("access_token", handle_access_token))  # 注册新命令
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_task))
 
