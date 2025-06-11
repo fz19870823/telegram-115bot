@@ -331,10 +331,18 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_user_tokens(user_id, data['access_token'], data['refresh_token'], data['expires_in'])
         tokens = load_user_tokens(user_id)
 
+    # 新增：计算 access_token 有效期并转换为北京时间
+    expire_at = tokens["access_token_expire_at"]
+    if expire_at > 0:
+        expire_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expire_at))
+    else:
+        expire_time = "未知"
+
     response_text = (
         f"👤 用户 ID: {user_id}\n"
         f"📁 CID: {cid}\n"
         f"🔑 Access Token: {tokens['access_token']}\n"
+        f"⏰ Access Token 有效期: {expire_time}\n"  # 新增：显示 access_token 有效期
         f"🔄 Refresh Token: {tokens['refresh_token']}"
     )
     await update.message.reply_text(response_text)
