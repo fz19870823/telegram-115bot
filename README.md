@@ -9,7 +9,8 @@
 ```
 project-root/
 ├── docker-compose.yml        # Docker Compose 配置文件
-└── config.ini                # 你的 Telegram Bot 配置文件
+├── config.ini                # 你的 Telegram Bot 配置文件
+└── worker.js                 # 用于获取 115 网盘刷新令牌的网页
 ```
 
 ---
@@ -45,16 +46,16 @@ networks:
 
 ## 📝 参数说明
 
-| 配置项            | 描述 |
-|-------------------|------|
-| `image`           | 指定镜像名，可为公开或私有镜像。 |
-| `container_name`  | 容器名称，方便使用 `docker ps` 管理。 |
-| `volumes`         | 挂载配置文件到容器内。注意路径对应并具有适当读写权限。 |
-| `user`            | 指定以 `root` 身份运行容器（如需写权限）。可根据需求修改。 |
-| `networks`        | 使用外部 Docker 网络，便于 IP 管理或与其他容器通信。 |
-| `ipv4_address`    | 固定容器 IP 地址（确保不冲突）。 |
-| `restart`         | 设置重启策略，推荐使用 `unless-stopped`。 |
-| `logging`         | 设置日志轮换，避免日志文件无限增长。 |
+| 配置项           | 描述 |
+|------------------|------|
+| `image`          | 指定镜像名，可为公开或私有镜像。 |
+| `container_name` | 容器名称，方便使用 `docker ps` 管理。 |
+| `volumes`        | 挂载配置文件到容器内。注意路径对应并具有适当读写权限。 |
+| `user`           | 指定以 `root` 身份运行容器（如需写权限）。可根据需求修改。 |
+| `networks`       | 使用外部 Docker 网络，便于 IP 管理或与其他容器通信。 |
+| `ipv4_address`   | 固定容器 IP 地址（确保不冲突）。 |
+| `restart`        | 设置重启策略，推荐使用 `unless-stopped`。 |
+| `logging`        | 设置日志轮换，避免日志文件无限增长。 |
 
 ---
 
@@ -80,6 +81,21 @@ docker network create \
 ```bash
 docker-compose up -d
 ```
+
+---
+
+## 🛠️ `worker.js`：获取 115 网盘刷新令牌网页
+
+`worker.js` 是一个轻量网页服务，用于用户手动登录并获取 115 网盘的 `refresh_token`。**你可以将该文件部署在任意支持 JavaScript 的 Web 平台（如 Cloudflare Workers）上。**
+
+### ✨ 使用方式
+
+1. 打开 `worker.js`，将文件中的 `appid` 值替换为你自己的 115 应用 ID。
+2. 将修改后的 `worker.js` 部署至 [Cloudflare Workers](https://workers.cloudflare.com/) 或你喜欢的平台。
+3. 访问部署后的网页并登录 115 网盘账号，网页将显示你的 `refresh_token`。
+4. 将获取到的 `refresh_token` 填入 `config.ini` 或其他配置中使用。
+
+> ⚠️ **请勿公开部署或分享该网页，避免令牌泄露风险。**
 
 ---
 
@@ -119,9 +135,7 @@ token = YOUR_BOT_TOKEN_HERE
 - **请妥善保管 `token`，不要泄露给他人。**
 - 若配置文件路径变动，请同步更新 `docker-compose.yml` 中的挂载路径。
 
-
-
-
+---
 
 ## 📬 联系与支持
 
