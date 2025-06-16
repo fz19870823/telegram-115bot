@@ -459,10 +459,15 @@ async def handle_organize_videos(update: Update, context: ContextTypes.DEFAULT_T
 
             # 第二步：列出视频文件并找出大于200MB的文件
             files = await list_files(client, cid)
-            big_video_ids = [
-                file["fid"] for file in files
-                if file.get("fc") == "1" and int(file.get("fs", 0)) > 200 * 1024 * 1024
-            ]
+            big_video_ids = []
+            moved_files = []
+            for file in files:
+                if file.get("fc") == "1" and int(file.get("fs", 0)) > 200 * 1024 * 1024:
+                    big_video_ids.append(file["fid"])
+                    moved_files.append({
+                        "name": file.get("fn", "未知文件名"),
+                        "size": int(file.get("fs", 0))
+                    })
             logging.info(f"准备移动的文件数: {len(big_video_ids)}")
 
             # 移动文件
@@ -473,7 +478,14 @@ async def handle_organize_videos(update: Update, context: ContextTypes.DEFAULT_T
             await delete_files(client, cid, exclude_ids={folder_id})
             logging.info("目录清理完成")
 
-            await update.message.reply_text("视频文件整理完成！")
+            # 发送整理结果
+            result_text = "视频文件整理完成！\n"
+            result_text += f"移动文件数: {len(moved_files)}\n"
+            result_text += f"删除文件/文件夹数: {len(delete_ids)}\n\n"
+            result_text += "移动的文件详情:\n"
+            for file in moved_files:
+                result_text += f"- 文件名: {file['name']}, 大小: {file['size'] / (1024 * 1024):.2f} MB\n"
+            await send_long_message(update, context, result_text)
         except Exception as e:
             logging.error(f"视频文件整理失败: {e}")
             await update.message.reply_text(f"❌ 视频文件整理失败：{e}")
@@ -539,10 +551,12 @@ async def delete_files(client, cid, exclude_ids):
     items = res.get("data", [])
 
     delete_ids = []
+    deleted_names = []  # 新增：用于记录删除的文件（夹）名称
     for item in items:
         item_id = item.get("fid") or item.get("cid")
         if item_id and item_id not in exclude_ids:
             delete_ids.append(item_id)
+            deleted_names.append(item.get("fn") or "未知文件名")  # 修改：使用 fn 字段记录文件名
 
     if delete_ids:
         del_url = "https://proapi.115.com/open/ufile/delete"
@@ -551,7 +565,7 @@ async def delete_files(client, cid, exclude_ids):
         del_res = del_resp.json()
         if not del_res.get("state"):
             raise Exception(f"删除文件失败: {del_res}")
-        logging.info(f"已删除文件/文件夹数: {len(delete_ids)}")
+        logging.info(f"已删除文件/文件夹数: {len(delete_ids)}，名称: {', '.join(deleted_names)}")  # 修改：增加删除文件（夹）名称的日志记录
     else:
         logging.info("无可删除内容。")
 
