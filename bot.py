@@ -2,6 +2,8 @@ import os
 import configparser
 import sys
 import time
+import random
+import httpx
 import aiohttp
 import logging
 import traceback
@@ -433,6 +435,126 @@ async def handle_quota(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"获取配额信息时发生内部错误:\n{traceback.format_exc()}")
         await update.message.reply_text("❌ 获取配额信息时发生内部错误。")
 
+async def handle_organize_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    处理 /organize_videos 命令，执行视频文件整理逻辑。
+    """
+    logging.info("Executing: handle_organize_videos")
+    user_id = str(update.effective_user.id)
+    access_token = await check_and_get_access_token(user_id, context)
+    if not access_token:
+        return
+
+    cid = load_user_cid(user_id)
+    if not cid:
+        await update.message.reply_text("未设置 CID，请先通过 /set_cid 设置。")
+        return
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(headers=headers, timeout=20) as client:
+        try:
+            # 第一步：创建新文件夹
+            folder_id, folder_name = await create_folder(client, cid)
+            logging.info(f"已创建文件夹：{folder_name}（CID: {folder_id}）")
+
+            # 第二步：列出视频文件并找出大于200MB的文件
+            files = await list_files(client, cid)
+            big_video_ids = [
+                file["fid"] for file in files
+                if file.get("fc") == "1" and int(file.get("fs", 0)) > 200 * 1024 * 1024
+            ]
+            logging.info(f"准备移动的文件数: {len(big_video_ids)}")
+
+            # 移动文件
+            await move_files(client, big_video_ids, folder_id)
+            logging.info("文件移动完成")
+
+            # 第三步：清空目录（排除新建文件夹）
+            await delete_files(client, cid, exclude_ids={folder_id})
+            logging.info("目录清理完成")
+
+            await update.message.reply_text("视频文件整理完成！")
+        except Exception as e:
+            logging.error(f"视频文件整理失败: {e}")
+            await update.message.reply_text(f"❌ 视频文件整理失败：{e}")
+
+# 生成随机中文字符串
+def random_chinese(length=4):
+    return ''.join(chr(random.randint(0x4E00, 0x9FA5)) for _ in range(length))
+
+# 新增函数：创建文件夹
+async def create_folder(client, parent_cid):
+    url = "https://proapi.115.com/open/folder/add"
+    name = random_chinese(random.randint(3, 6))
+    data = {
+        "pid": str(parent_cid),
+        "file_name": name
+    }
+    response = await client.post(url, data=data)
+    res = response.json()
+    if not res.get("state"):
+        raise Exception(f"创建文件夹失败: {res}")
+    return res["data"]["file_id"], res["data"]["file_name"]
+
+# 新增函数：列出文件
+async def list_files(client, cid):
+    url = "https://proapi.115.com/open/ufile/files"
+    params = {
+        "cid": str(cid),
+        "type": 4,  # 视频类型
+        "limit": 1150
+    }
+    response = await client.get(url, params=params)
+    res = response.json()
+    if not res.get("state"):
+        raise Exception(f"获取文件列表失败: {res}")
+    return res.get("data", [])
+
+# 新增函数：移动文件
+async def move_files(client, file_ids, to_cid):
+    if not file_ids:
+        return
+    url = "https://proapi.115.com/open/ufile/move"
+    data = {
+        "file_ids": ','.join(file_ids),
+        "to_cid": str(to_cid)
+    }
+    response = await client.post(url, data=data)
+    res = response.json()
+    if not res.get("state"):
+        raise Exception(f"移动文件失败: {res}")
+
+# 新增函数：删除文件
+async def delete_files(client, cid, exclude_ids):
+    url = "https://proapi.115.com/open/ufile/files"
+    params = {
+        "cid": str(cid),
+        "limit": 1150,
+        "show_dir": 1,
+    }
+    response = await client.get(url, params=params)
+    res = response.json()
+    if not res.get("state"):
+        raise Exception(f"列出文件失败: {res}")
+    items = res.get("data", [])
+
+    delete_ids = []
+    for item in items:
+        item_id = item.get("fid") or item.get("cid")
+        if item_id and item_id not in exclude_ids:
+            delete_ids.append(item_id)
+
+    if delete_ids:
+        del_url = "https://proapi.115.com/open/ufile/delete"
+        data = {"file_ids": ",".join(delete_ids), "parent_id": str(cid)}
+        del_resp = await client.post(del_url, data=data)
+        del_res = del_resp.json()
+        if not del_res.get("state"):
+            raise Exception(f"删除文件失败: {del_res}")
+        logging.info(f"已删除文件/文件夹数: {len(delete_ids)}")
+    else:
+        logging.info("无可删除内容。")
+
 async def setup_commands(app):
     logging.info("Executing: setup_commands")
     await app.bot.set_my_commands([
@@ -440,7 +562,8 @@ async def setup_commands(app):
         BotCommand(command="set_refresh_token", description="设置 115 的 refresh_token"),
         BotCommand(command="set_cid", description="设置 115 的 CID"),
         BotCommand(command="status", description="查看用户状态（包括用户 ID、CID、access_token 和 refresh_token）"),
-        BotCommand(command="quota", description="查看离线任务配额信息")
+        BotCommand(command="quota", description="查看离线任务配额信息"),
+        BotCommand(command="organize_videos", description="整理视频文件")  # 新增命令
     ])
 
 def main():
@@ -463,6 +586,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("quota", handle_quota))
+    app.add_handler(CommandHandler("organize_videos", handle_organize_videos))  # 注册新命令
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_task))
 
