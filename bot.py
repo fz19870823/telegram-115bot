@@ -475,13 +475,14 @@ async def handle_organize_videos(update: Update, context: ContextTypes.DEFAULT_T
             logging.info("文件移动完成")
 
             # 第三步：清空目录（排除新建文件夹）
-            await delete_files(client, cid, exclude_ids={folder_id})
+            # 修改：接收 delete_ids 和 deleted_names
+            delete_ids, deleted_names = await delete_files(client, cid, exclude_ids={folder_id})
             logging.info("目录清理完成")
 
             # 发送整理结果
             result_text = "视频文件整理完成！\n"
             result_text += f"移动文件数: {len(moved_files)}\n"
-            result_text += f"删除文件/文件夹数: {len(delete_ids)}\n\n"
+            result_text += f"删除文件/文件夹数: {len(delete_ids)}\n\n"  # 修改：使用 delete_ids 的长度
             result_text += "移动的文件详情:\n"
             for file in moved_files:
                 result_text += f"- 文件名: {file['name']}, 大小: {file['size'] / (1024 * 1024):.2f} MB\n"
@@ -568,6 +569,9 @@ async def delete_files(client, cid, exclude_ids):
         logging.info(f"已删除文件/文件夹数: {len(delete_ids)}，名称: {', '.join(deleted_names)}")  # 修改：增加删除文件（夹）名称的日志记录
     else:
         logging.info("无可删除内容。")
+
+    # 新增：返回删除的文件 ID 和名称
+    return delete_ids, deleted_names
 
 async def setup_commands(app):
     logging.info("Executing: setup_commands")
