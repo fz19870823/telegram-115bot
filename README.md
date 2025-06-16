@@ -95,7 +95,14 @@ docker-compose up -d
 3. 访问部署后的网页并登录 115 网盘账号，网页将显示你的 `refresh_token`。
 4. 将获取到的 `refresh_token` 填入 `config.ini` 或其他配置中使用。
 
-> ⚠️ **请勿公开部署或分享该网页，避免令牌泄露风险。**
+### 🌐 示例页面
+
+如果你不想自行部署，也可以使用作者已搭建的演示网页：
+
+🔗 [https://115token.fzserver.top](https://115token.fzserver.top)
+
+> ⚠️ 该页面每日限制请求次数为 10 万次，请勿频繁刷新。
+
 
 ---
 
