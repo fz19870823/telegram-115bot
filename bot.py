@@ -483,9 +483,11 @@ async def handle_organize_videos(update: Update, context: ContextTypes.DEFAULT_T
             result_text = "视频文件整理完成！\n"
             result_text += f"移动文件数: {len(moved_files)}\n"
             result_text += f"删除文件/文件夹数: {len(delete_ids)}\n\n"  # 修改：使用 delete_ids 的长度
-            result_text += "移动的文件详情:\n"
+
+            # 记录移动的文件详情到日志中
             for file in moved_files:
-                result_text += f"- 文件名: {file['name']}, 大小: {file['size'] / (1024 * 1024):.2f} MB\n"
+                logging.info(f"移动的文件: {file['name']}, 大小: {file['size'] / (1024 * 1024):.2f} MB")
+
             await send_long_message(update, context, result_text)
         except Exception as e:
             logging.error(f"视频文件整理失败: {e}")
