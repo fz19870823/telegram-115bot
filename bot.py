@@ -7,9 +7,9 @@ import httpx
 import aiohttp
 import logging
 import traceback
-from telegram import Update, BotCommand
+from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler, filters,
-                          ContextTypes, ConversationHandler)
+                          ContextTypes, ConversationHandler, CallbackQueryHandler)
 
 # 修改：明确指定日志文件路径
 LOG_FILE = os.path.join(os.path.dirname(__file__), 'bot.log')
@@ -102,6 +102,46 @@ def save_user_cid(user_id, cid):
     config[section]['cid'] = cid
     write_config(config)
 
+def save_user_download_folder(user_id, folder_id, folder_path):
+    """保存用户的下载文件夹设置"""
+    logging.info("Executing: save_user_download_folder")
+    config = read_config()
+    section = f"user_{user_id}"
+    if section not in config:
+        config[section] = {}
+    config[section]['download_folder_id'] = folder_id
+    config[section]['download_folder_path'] = folder_path
+    write_config(config)
+
+def load_user_download_folder(user_id):
+    """加载用户的下载文件夹设置"""
+    logging.info("Executing: load_user_download_folder")
+    config = read_config()
+    section = f"user_{user_id}"
+    if section not in config:
+        return None, None
+    return config[section].get("download_folder_id"), config[section].get("download_folder_path")
+
+def save_user_archive_folder(user_id, folder_id, folder_path):
+    """保存用户的归档文件夹设置"""
+    logging.info("Executing: save_user_archive_folder")
+    config = read_config()
+    section = f"user_{user_id}"
+    if section not in config:
+        config[section] = {}
+    config[section]['archive_folder_id'] = folder_id
+    config[section]['archive_folder_path'] = folder_path
+    write_config(config)
+
+def load_user_archive_folder(user_id):
+    """加载用户的归档文件夹设置"""
+    logging.info("Executing: load_user_archive_folder")
+    config = read_config()
+    section = f"user_{user_id}"
+    if section not in config:
+        return None, None
+    return config[section].get("archive_folder_id"), config[section].get("archive_folder_path")
+
 def extract_links(text):
     logging.info("Executing: extract_links")
     return text.strip().split('\n')
@@ -193,8 +233,13 @@ async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("未检测到有效的下载链接，请发送支持的磁力链（magnet）或电驴链接（ed2k）。")
             return
 
-        cid = load_user_cid(user_id) or "0"
-        success, result = await add_cloud_download_task(access_token, links, cid)
+        # 获取下载文件夹设置
+        download_folder_id, download_folder_path = load_user_download_folder(user_id)
+        if not download_folder_id:
+            await update.message.reply_text("请先通过 /set_download_folder 设置下载文件夹。")
+            return
+
+        success, result = await add_cloud_download_task(access_token, links, download_folder_id)
         if success:
             tasks = result.get("data", [])
             if not tasks:
@@ -237,21 +282,22 @@ async def send_long_message(update, context, message):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info("Executing: start")
     user_id = str(update.effective_user.id)
-    config = read_config()
-    section = f"user_{user_id}"
 
-    # 检查用户是否已存在于配置文件中
-    if section in config:
-        await update.message.reply_text('你好，我是你的机器人！请发送磁力链接（magnet）或电驴链接（ed2k）进行识别。')
-    else:
-        # 用户不存在于配置文件中，保存用户信息并回复提示
-        save_user_cid(user_id, "0")  # 保存用户 CID 默认值为 0
-        response_text = (
-            '你好，我是你的机器人！请发送磁力链接（magnet）或电驴链接（ed2k）进行识别。\n'
-            f'👤 用户 ID: {user_id}\n'
-            f'📁 CID: 0（默认值）'
-        )
-        await update.message.reply_text(response_text)
+    # 获取用户的文件夹设置状态
+    download_folder_id, download_folder_path = load_user_download_folder(user_id)
+    archive_folder_id, archive_folder_path = load_user_archive_folder(user_id)
+
+    response_text = '你好，我是你的机器人！请发送磁力链接（magnet）或电驴链接（ed2k）进行识别。\n\n'
+    response_text += f'👤 用户 ID: {user_id}\n'
+    response_text += f'📁 下载文件夹: {download_folder_path or "未设置"}\n'
+    response_text += f'📦 归档文件夹: {archive_folder_path or "未设置"}\n\n'
+
+    if not download_folder_id:
+        response_text += '⚠️ 请先使用 /set_download_folder 设置下载文件夹\n'
+    if not archive_folder_id:
+        response_text += '⚠️ 请先使用 /set_archive_folder 设置归档文件夹\n'
+
+    await update.message.reply_text(response_text)
 
 async def ask_refresh_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info("Executing: ask_refresh_token")
@@ -280,24 +326,15 @@ async def save_refresh_token(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
 
-async def ask_cid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logging.info("Executing: ask_cid")
-    await update.message.reply_text("请输入你的 115 CID：")
-    return ASK_CID
+async def set_download_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """设置下载文件夹"""
+    logging.info("Executing: set_download_folder")
+    await show_folder_selection(update, context, "0", 0, "download")
 
-async def save_cid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logging.info("Executing: save_cid")
-    cid = update.message.text.strip()
-    user_id = str(update.effective_user.id)
-
-    try:
-        save_user_cid(user_id, cid)
-        await update.message.reply_text(f"CID 已保存为：{cid}")
-        return ConversationHandler.END
-    except Exception:
-        logging.error(f"保存 CID 时发生异常:\n{traceback.format_exc()}")
-        await update.message.reply_text("保存 CID 时发生错误。")
-        return ConversationHandler.END
+async def set_archive_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """设置归档文件夹"""
+    logging.info("Executing: set_archive_folder")
+    await show_folder_selection(update, context, "0", 0, "archive")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info("Executing: cancel")
@@ -306,11 +343,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    处理 /status 命令，返回用户 ID、CID、access_token 和 refresh_token。
-    如果未设定 CID，则返回默认值 0。
+    处理 /status 命令，返回用户状态信息
     """
     user_id = str(update.effective_user.id)
-    cid = load_user_cid(user_id) or "0"
     tokens = load_user_tokens(user_id)
 
     if not tokens or not tokens.get("refresh_token"):
@@ -333,19 +368,24 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_user_tokens(user_id, data['access_token'], data['refresh_token'], data['expires_in'])
         tokens = load_user_tokens(user_id)
 
-    # 新增：计算 access_token 有效期并转换为北京时间
+    # 计算 access_token 有效期并转换为北京时间
     expire_at = tokens["access_token_expire_at"]
     if expire_at > 0:
         expire_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(expire_at))
     else:
         expire_time = "未知"
 
+    # 获取文件夹设置
+    download_folder_id, download_folder_path = load_user_download_folder(user_id)
+    archive_folder_id, archive_folder_path = load_user_archive_folder(user_id)
+
     response_text = (
-        f"👤 用户 ID: {user_id}\n"
-        f"📁 CID: {cid}\n"
-        f"🔑 Access Token: {tokens['access_token']}\n"
-        f"⏰ Access Token 有效期: {expire_time}\n"  # 新增：显示 access_token 有效期
-        f"🔄 Refresh Token: {tokens['refresh_token']}"
+        f"� 用户 ID: {user_id}\n"
+        f"🔑 Access Token: {tokens['access_token'][:20]}...\n"
+        f"⏰ Access Token 有效期: {expire_time}\n"
+        f"🔄 Refresh Token: {tokens['refresh_token'][:20]}...\n\n"
+        f"📁 下载文件夹: {download_folder_path or '未设置'}\n"
+        f"📦 归档文件夹: {archive_folder_path or '未设置'}"
     )
     await update.message.reply_text(response_text)
 
@@ -445,20 +485,21 @@ async def handle_organize_videos(update: Update, context: ContextTypes.DEFAULT_T
     if not access_token:
         return
 
-    cid = load_user_cid(user_id)
-    if not cid:
-        await update.message.reply_text("未设置 CID，请先通过 /set_cid 设置。")
+    # 获取下载文件夹设置
+    download_folder_id, download_folder_path = load_user_download_folder(user_id)
+    if not download_folder_id:
+        await update.message.reply_text("请先通过 /set_download_folder 设置下载文件夹。")
         return
 
     headers = {"Authorization": f"Bearer {access_token}"}
     async with httpx.AsyncClient(headers=headers, timeout=20) as client:
         try:
             # 第一步：创建新文件夹
-            folder_id, folder_name = await create_folder(client, cid)
+            folder_id, folder_name = await create_folder(client, download_folder_id)
             logging.info(f"已创建文件夹：{folder_name}（CID: {folder_id}）")
 
             # 第二步：列出视频文件并找出大于200MB的文件
-            files = await list_files(client, cid)
+            files = await list_files(client, download_folder_id)
             big_video_ids = []
             moved_files = []
             for file in files:
@@ -475,8 +516,7 @@ async def handle_organize_videos(update: Update, context: ContextTypes.DEFAULT_T
             logging.info("文件移动完成")
 
             # 第三步：清空目录（排除新建文件夹）
-            # 修改：接收 delete_ids 和 deleted_names
-            delete_ids, deleted_names = await delete_files(client, cid, exclude_ids={folder_id})
+            delete_ids, deleted_names = await delete_files(client, download_folder_id, exclude_ids={folder_id})
             logging.info("目录清理完成")
 
             # 发送整理结果
@@ -512,11 +552,11 @@ async def create_folder(client, parent_cid):
     return res["data"]["file_id"], res["data"]["file_name"]
 
 # 新增函数：列出文件
-async def list_files(client, cid):
+async def list_files(client, cid, file_type=4):
     url = "https://proapi.115.com/open/ufile/files"
     params = {
         "cid": str(cid),
-        "type": 4,  # 视频类型
+        "type": file_type,  # 4=视频类型, 0=所有类型
         "limit": 1150
     }
     response = await client.get(url, params=params)
@@ -575,15 +615,367 @@ async def delete_files(client, cid, exclude_ids):
     # 新增：返回删除的文件 ID 和名称
     return delete_ids, deleted_names
 
+# 新增函数：查找或创建指定路径的文件夹
+async def find_or_create_folder_by_path(client, root_cid, folder_path):
+    """
+    根据路径查找或创建文件夹
+    folder_path: 如 "/nc-17/归档"
+    返回: (folder_id, folder_name)
+    """
+    logging.info(f"查找或创建文件夹路径: {folder_path}")
+
+    # 分割路径
+    path_parts = [part for part in folder_path.split('/') if part]
+    current_cid = root_cid
+
+    for part in path_parts:
+        # 查找当前目录下是否存在该文件夹
+        folder_found = False
+        items = await list_all_items(client, current_cid)
+
+        for item in items:
+            # 检查是否为文件夹且名称匹配（文件夹的fc='0'）
+            if str(item.get("fc")) == "0" and item.get("fn") == part:
+                current_cid = item["fid"]  # 文件夹使用fid作为ID
+                folder_found = True
+                logging.info(f"找到文件夹: {part} (FID: {current_cid})")
+                break
+
+        # 如果没找到，则创建
+        if not folder_found:
+            current_cid, created_name = await create_folder_with_name(client, current_cid, part)
+            logging.info(f"创建文件夹: {created_name} (FID: {current_cid})")
+
+    return current_cid, path_parts[-1] if path_parts else "root"
+
+# 新增函数：创建指定名称的文件夹
+async def create_folder_with_name(client, parent_cid, folder_name):
+    url = "https://proapi.115.com/open/folder/add"
+    data = {
+        "pid": str(parent_cid),
+        "file_name": folder_name
+    }
+    response = await client.post(url, data=data)
+    res = response.json()
+    if not res.get("state"):
+        raise Exception(f"创建文件夹失败: {res}")
+    return res["data"]["file_id"], res["data"]["file_name"]
+
+# 新增函数：列出所有项目（包括文件和文件夹）
+async def list_all_items(client, cid):
+    url = "https://proapi.115.com/open/ufile/files"
+    params = {
+        "cid": str(cid),
+        "limit": 1150,
+        "show_dir": 1,  # 显示文件夹
+    }
+    response = await client.get(url, params=params)
+    res = response.json()
+    if not res.get("state"):
+        raise Exception(f"获取项目列表失败: {res}")
+    return res.get("data", [])
+
+# 新增函数：获取文件夹列表（仅文件夹）
+async def list_folders_only(client, cid, page=0, limit=1150):
+    """获取指定目录下的文件夹列表"""
+    url = "https://proapi.115.com/open/ufile/files"
+    params = {
+        "cid": str(cid),
+        "limit": 1150,  # 设置为最大值，确保获取所有项目
+        "offset": page * limit,
+        "show_dir": 1  # 显示文件夹
+    }
+    response = await client.get(url, params=params)
+    res = response.json()
+    if not res.get("state"):
+        raise Exception(f"获取文件夹列表失败: {res}")
+
+    # 根据官方文档，fc='0'表示文件夹，fc='1'表示文件
+    all_items = res.get("data", [])
+
+    # 处理fc字段可能是字符串或数字的情况
+    folders = [item for item in all_items if str(item.get("fc")) == "0"]  # 转换为字符串比较
+
+    # 添加调试信息
+    logging.info(f"获取文件夹列表 - CID: {cid}, 总项目数: {len(all_items)}, 文件夹数: {len(folders)}")
+    for i, folder in enumerate(folders[:3]):  # 只记录前3个文件夹的信息
+        logging.info(f"文件夹 {i+1}: 名称={folder.get('fn', '未知')}, FID={folder.get('fid', '未知')}")
+
+    return folders, len(folders)  # 返回实际的文件夹数量
+
+# 新增函数：获取文件夹路径
+async def get_folder_path(client, folder_id):
+    """获取文件夹的完整路径"""
+    if folder_id == "0":
+        return "/"  # 根目录
+
+    # 尝试通过文件列表API获取路径信息
+    try:
+        url = "https://proapi.115.com/open/ufile/files"
+        params = {"cid": str(folder_id), "limit": 1}
+        response = await client.get(url, params=params)
+        res = response.json()
+
+        if res.get("state") and res.get("path"):
+            path_data = res.get("path", [])
+            if path_data:
+                # 构建路径字符串
+                path_parts = [item.get("name", "") for item in path_data if item.get("name")]
+                return "/" + "/".join(path_parts) if path_parts else "/"
+    except Exception as e:
+        logging.warning(f"获取路径时发生异常: {e}")
+
+    # 如果无法获取路径，返回文件夹ID作为标识
+    return f"/folder_{folder_id}"
+
+# 新增函数：显示文件夹选择界面
+async def show_folder_selection(update, context, current_cid="0", page=0, selection_type="download", parent_cid=None):
+    """显示文件夹选择界面"""
+    user_id = str(update.effective_user.id)
+    access_token = await check_and_get_access_token(user_id, context)
+    if not access_token:
+        return
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(headers=headers, timeout=20) as client:
+        try:
+            # 获取文件夹列表（API获取所有，然后分页显示）
+            all_folders, total_count = await list_folders_only(client, current_cid, 0, 1150)
+
+            # 分页显示文件夹
+            page_size = 8
+            start_idx = page * page_size
+            end_idx = start_idx + page_size
+            folders = all_folders[start_idx:end_idx]
+
+            logging.info(f"显示文件夹选择界面 - 总文件夹数: {total_count}, 当前页显示: {len(folders)}")
+
+            # 获取当前路径
+            current_path = await get_folder_path(client, current_cid)
+
+            # 构建键盘
+            keyboard = []
+
+            # 如果不是根目录，添加上一层按钮
+            if current_cid != "0" and parent_cid:
+                keyboard.append([InlineKeyboardButton("⬆️ 上一层", callback_data=f"folder_up_{selection_type}_{parent_cid}_0")])
+
+            # 添加文件夹列表
+            for folder in folders:
+                folder_name = folder.get("fn", "未知文件夹")
+                folder_fid = folder.get("fid")  # 文件夹使用fid作为ID
+                if len(folder_name) > 20:
+                    display_name = folder_name[:17] + "..."
+                else:
+                    display_name = folder_name
+
+                # 左侧显示文件夹名，右侧显示选择按钮
+                keyboard.append([
+                    InlineKeyboardButton(f"📁 {display_name}", callback_data=f"folder_enter_{selection_type}_{folder_fid}_0"),
+                    InlineKeyboardButton("✅ 选择", callback_data=f"folder_select_{selection_type}_{folder_fid}")
+                ])
+
+            # 添加翻页按钮
+            nav_buttons = []
+            page_size = 8
+            if page > 0:
+                nav_buttons.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"folder_page_{selection_type}_{current_cid}_{page-1}"))
+
+            if (page + 1) * page_size < total_count:
+                nav_buttons.append(InlineKeyboardButton("➡️ 下一页", callback_data=f"folder_page_{selection_type}_{current_cid}_{page+1}"))
+
+            if nav_buttons:
+                keyboard.append(nav_buttons)
+
+            # 添加取消按钮
+            keyboard.append([InlineKeyboardButton("❌ 取消", callback_data=f"folder_cancel_{selection_type}")])
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            folder_type_name = "下载文件夹" if selection_type == "download" else "归档文件夹"
+            page_info = f"第 {page + 1} 页" if total_count > 8 else ""
+            message_text = f"请选择{folder_type_name}:\n\n📍 当前路径: {current_path}\n📊 文件夹总数: {total_count} {page_info}"
+
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup)
+            else:
+                await update.message.reply_text(message_text, reply_markup=reply_markup)
+
+        except Exception as e:
+            logging.error(f"显示文件夹选择界面失败: {e}")
+            error_msg = f"❌ 获取文件夹列表失败：{e}"
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(error_msg)
+            else:
+                await update.message.reply_text(error_msg)
+
+# 新增函数：处理文件夹选择回调
+async def handle_folder_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理文件夹选择的回调"""
+    query = update.callback_query
+    await query.answer()
+
+    callback_data = query.data
+    parts = callback_data.split('_')
+
+    if len(parts) < 3:
+        await query.edit_message_text("❌ 无效的操作")
+        return
+
+    action = parts[1]  # enter, select, page, up, cancel
+    selection_type = parts[2]  # download, archive
+
+    user_id = str(update.effective_user.id)
+    access_token = await check_and_get_access_token(user_id, context)
+    if not access_token:
+        return
+
+    try:
+        if action == "enter":
+            # 进入文件夹
+            folder_fid = parts[3]  # 文件夹的fid
+            page = int(parts[4]) if len(parts) > 4 else 0
+
+            # 进入子文件夹，使用fid作为新的cid
+            # 这里需要获取当前的cid，暂时使用"0"作为parent_cid
+            await show_folder_selection(update, context, folder_fid, page, selection_type, "0")
+
+        elif action == "select":
+            # 选择文件夹
+            folder_fid = parts[3]  # 文件夹的fid
+
+            headers = {"Authorization": f"Bearer {access_token}"}
+            async with httpx.AsyncClient(headers=headers, timeout=20) as client:
+                folder_path = await get_folder_path(client, folder_fid)
+
+                if selection_type == "download":
+                    save_user_download_folder(user_id, folder_fid, folder_path)
+                    await query.edit_message_text(f"✅ 下载文件夹已设置为:\n📁 {folder_path}")
+                else:  # archive
+                    save_user_archive_folder(user_id, folder_fid, folder_path)
+                    await query.edit_message_text(f"✅ 归档文件夹已设置为:\n📁 {folder_path}")
+
+        elif action == "page":
+            # 翻页
+            current_folder_id = parts[3]
+            page = int(parts[4])
+            await show_folder_selection(update, context, current_folder_id, page, selection_type)
+
+        elif action == "up":
+            # 返回上一层
+            parent_cid = parts[3]
+            page = int(parts[4]) if len(parts) > 4 else 0
+            await show_folder_selection(update, context, parent_cid, page, selection_type)
+
+        elif action == "cancel":
+            # 取消选择
+            await query.edit_message_text("❌ 已取消文件夹选择")
+
+    except Exception as e:
+        logging.error(f"处理文件夹选择回调失败: {e}")
+        await query.edit_message_text(f"❌ 操作失败：{e}")
+
+async def handle_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    处理 /清理 命令，将所有目录下的文件移动到归档目录下
+    """
+    logging.info("Executing: handle_cleanup")
+    user_id = str(update.effective_user.id)
+    access_token = await check_and_get_access_token(user_id, context)
+    if not access_token:
+        return
+
+    # 获取下载文件夹和归档文件夹设置
+    download_folder_id, download_folder_path = load_user_download_folder(user_id)
+    archive_folder_id, archive_folder_path = load_user_archive_folder(user_id)
+
+    if not download_folder_id:
+        await update.message.reply_text("请先通过 /set_download_folder 设置下载文件夹。")
+        return
+
+    if not archive_folder_id:
+        await update.message.reply_text("请先通过 /set_archive_folder 设置归档文件夹。")
+        return
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        try:
+            await update.message.reply_text("🔄 开始清理操作...")
+            await update.message.reply_text(f"📁 下载文件夹：{download_folder_path}")
+            await update.message.reply_text(f"� 归档文件夹：{archive_folder_path}")
+
+            # 获取下载文件夹下的所有文件和文件夹
+            await update.message.reply_text("📋 正在获取文件列表...")
+            all_items = await list_all_items(client, download_folder_id)
+
+            # 收集需要移动的项目
+            items_to_move = []
+            moved_items_info = []
+
+            for item in all_items:
+                item_id = item.get("fid") or item.get("cid")
+                item_name = item.get("fn", "未知文件名")
+
+                if item_id:
+                    items_to_move.append(item_id)
+                    moved_items_info.append({
+                        "name": item_name,
+                        "type": "文件夹" if item.get("cid") else "文件",
+                        "size": int(item.get("fs", 0)) if item.get("fs") else 0
+                    })
+
+            if not items_to_move:
+                await update.message.reply_text("✅ 下载文件夹已经是空的，无需清理。")
+                return
+
+            await update.message.reply_text(f"📦 找到 {len(items_to_move)} 个项目需要移动到归档目录...")
+
+            # 移动所有文件和文件夹到归档目录
+            await move_files(client, items_to_move, archive_folder_id)
+            logging.info(f"已移动 {len(items_to_move)} 个项目到归档目录")
+
+            # 发送清理结果
+            result_text = "🎉 清理操作完成！\n\n"
+            result_text += f"📁 下载文件夹：{download_folder_path}\n"
+            result_text += f"📦 归档文件夹：{archive_folder_path}\n"
+            result_text += f"📦 移动项目数：{len(moved_items_info)}\n\n"
+            result_text += "移动的项目详情：\n"
+
+            for i, item in enumerate(moved_items_info[:20], 1):  # 最多显示前20个
+                size_info = ""
+                if item["size"] > 0:
+                    size_mb = item["size"] / (1024 * 1024)
+                    if size_mb >= 1:
+                        size_info = f" ({size_mb:.1f} MB)"
+                    else:
+                        size_info = f" ({item['size']} B)"
+
+                result_text += f"{i}. {item['type']}: {item['name']}{size_info}\n"
+
+            if len(moved_items_info) > 20:
+                result_text += f"... 还有 {len(moved_items_info) - 20} 个项目\n"
+
+            # 记录移动的项目详情到日志中
+            for item in moved_items_info:
+                logging.info(f"移动的{item['type']}: {item['name']}, 大小: {item['size']} 字节")
+
+            await send_long_message(update, context, result_text)
+
+        except Exception as e:
+            logging.error(f"清理操作失败: {e}")
+            await update.message.reply_text(f"❌ 清理操作失败：{e}")
+
 async def setup_commands(app):
     logging.info("Executing: setup_commands")
     await app.bot.set_my_commands([
         BotCommand(command="start", description="开始与机器人交互"),
         BotCommand(command="set_refresh_token", description="设置 115 的 refresh_token"),
-        BotCommand(command="set_cid", description="设置 115 的 CID"),
-        BotCommand(command="status", description="查看用户状态（包括用户 ID、CID、access_token 和 refresh_token）"),
+        BotCommand(command="set_download_folder", description="设置下载文件夹"),
+        BotCommand(command="set_archive_folder", description="设置归档文件夹"),
+        BotCommand(command="status", description="查看用户状态信息"),
         BotCommand(command="quota", description="查看离线任务配额信息"),
-        BotCommand(command="organize_videos", description="整理视频文件")  # 新增命令
+        BotCommand(command="organize_videos", description="整理视频文件"),
+        BotCommand(command="cleanup", description="将下载文件夹的所有文件移动到归档文件夹")
     ])
 
 def main():
@@ -593,12 +985,10 @@ def main():
 
     conv_handler = ConversationHandler(
         entry_points=[
-            CommandHandler("set_refresh_token", ask_refresh_token),
-            CommandHandler("set_cid", ask_cid)
+            CommandHandler("set_refresh_token", ask_refresh_token)
         ],
         states={
-            ASK_REFRESH_TOKEN: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_refresh_token)],
-            ASK_CID: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_cid)]
+            ASK_REFRESH_TOKEN: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_refresh_token)]
         },
         fallbacks=[CommandHandler("cancel", cancel)]
     )
@@ -606,7 +996,11 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("quota", handle_quota))
-    app.add_handler(CommandHandler("organize_videos", handle_organize_videos))  # 注册新命令
+    app.add_handler(CommandHandler("organize_videos", handle_organize_videos))
+    app.add_handler(CommandHandler("cleanup", handle_cleanup))
+    app.add_handler(CommandHandler("set_download_folder", set_download_folder))
+    app.add_handler(CommandHandler("set_archive_folder", set_archive_folder))
+    app.add_handler(CallbackQueryHandler(handle_folder_callback))  # 处理文件夹选择回调
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_task))
 
