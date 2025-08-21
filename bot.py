@@ -965,6 +965,155 @@ async def handle_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.error(f"清理操作失败: {e}")
             await update.message.reply_text(f"❌ 清理操作失败：{e}")
 
+# 新增函数：获取云下载任务列表
+async def get_task_list(client, page=1):
+    """获取云下载任务列表"""
+    url = "https://proapi.115.com/open/offline/get_task_list"
+    params = {"page": page}
+    response = await client.get(url, params=params)
+    res = response.json()
+    if not res.get("state"):
+        raise Exception(f"获取任务列表失败: {res}")
+    return res.get("data", {})
+
+# 新增函数：获取未完成任务
+async def get_incomplete_tasks(client):
+    """获取所有未完成的云下载任务"""
+    incomplete_tasks = []
+    page = 1
+
+    while True:
+        logging.info(f"获取第 {page} 页任务列表")
+        data = await get_task_list(client, page)
+        tasks = data.get("tasks", [])
+        page_count = data.get("page_count", 1)
+
+        if not tasks:
+            break
+
+        # 检查当前页是否有已完成任务
+        has_completed_task = False
+        current_page_incomplete = []
+
+        for task in tasks:
+            try:
+                status = int(task.get("status", -1))
+                if status == 2:  # 已完成任务
+                    has_completed_task = True
+                else:  # 未完成任务
+                    current_page_incomplete.append(task)
+            except (ValueError, TypeError) as e:
+                logging.warning(f"任务状态转换失败: {task.get('status')}, 错误: {e}")
+                # 如果状态无法转换，假设是未完成任务
+                current_page_incomplete.append(task)
+
+        # 添加当前页的未完成任务
+        incomplete_tasks.extend(current_page_incomplete)
+
+        logging.info(f"第 {page} 页：总任务 {len(tasks)}，未完成 {len(current_page_incomplete)}，有已完成任务: {has_completed_task}")
+
+        # 如果当前页有已完成任务，说明后面都是已完成的，停止获取
+        if has_completed_task:
+            logging.info("发现已完成任务，停止获取后续页面")
+            break
+
+        # 如果已经是最后一页，停止获取
+        if page >= page_count:
+            break
+
+        page += 1
+
+    return incomplete_tasks
+
+# 新增函数：处理获取任务状态命令
+async def handle_task_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理 /task_status 命令，显示未完成的云下载任务"""
+    logging.info("Executing: handle_task_status")
+    user_id = str(update.effective_user.id)
+    access_token = await check_and_get_access_token(user_id, context)
+    if not access_token:
+        return
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        try:
+            await update.message.reply_text("🔄 正在获取云下载任务状态...")
+
+            # 获取所有未完成任务
+            incomplete_tasks = await get_incomplete_tasks(client)
+
+            logging.info(f"获取到 {len(incomplete_tasks)} 个未完成任务")
+
+            if not incomplete_tasks:
+                await update.message.reply_text("✅ 当前没有未完成的云下载任务！")
+                return
+
+            # 构建任务状态消息
+            result_text = f"📋 未完成的云下载任务 ({len(incomplete_tasks)} 个):\n\n"
+
+            for i, task in enumerate(incomplete_tasks, 1):
+                # 添加调试信息
+                logging.info(f"处理任务 {i}: {task}")
+
+                task_name = task.get("name", "未知任务")
+
+                # 安全地转换百分比
+                try:
+                    percent_done = int(task.get("percentDone", 0))
+                except (ValueError, TypeError):
+                    percent_done = 0
+
+                # 安全地转换状态
+                try:
+                    status = int(task.get("status", -1))
+                except (ValueError, TypeError):
+                    status = -1
+
+                size_raw = task.get("size", 0)
+
+                # 安全地转换文件大小为数字
+                try:
+                    size = int(size_raw) if size_raw else 0
+                except (ValueError, TypeError):
+                    logging.warning(f"文件大小转换失败: {size_raw} (类型: {type(size_raw)})")
+                    size = 0
+
+                # 状态描述
+                status_desc = {
+                    -1: "❌ 下载失败",
+                    0: "⏳ 分配中",
+                    1: "⬇️ 下载中"
+                }.get(status, "❓ 未知状态")
+
+                # 文件大小格式化
+                if size > 0:
+                    size_gb = size / (1024 * 1024 * 1024)
+                    if size_gb >= 1:
+                        size_info = f" ({size_gb:.1f} GB)"
+                    else:
+                        size_mb = size / (1024 * 1024)
+                        size_info = f" ({size_mb:.1f} MB)"
+                else:
+                    size_info = ""
+
+                # 进度条
+                progress_bar = "█" * (percent_done // 10) + "░" * (10 - percent_done // 10)
+
+                result_text += f"{i}. {status_desc}\n"
+                result_text += f"📁 {task_name}{size_info}\n"
+                result_text += f"📊 进度: {percent_done}% [{progress_bar}]\n\n"
+
+                # 避免消息过长，最多显示20个任务
+                if i >= 20:
+                    result_text += f"... 还有 {len(incomplete_tasks) - 20} 个任务\n"
+                    break
+
+            await send_long_message(update, context, result_text)
+
+        except Exception as e:
+            logging.error(f"获取任务状态失败: {e}")
+            await update.message.reply_text(f"❌ 获取任务状态失败：{e}")
+
 async def setup_commands(app):
     logging.info("Executing: setup_commands")
     await app.bot.set_my_commands([
@@ -974,6 +1123,7 @@ async def setup_commands(app):
         BotCommand(command="set_archive_folder", description="设置归档文件夹"),
         BotCommand(command="status", description="查看用户状态信息"),
         BotCommand(command="quota", description="查看离线任务配额信息"),
+        BotCommand(command="task_status", description="查看未完成的云下载任务状态"),
         BotCommand(command="organize_videos", description="整理视频文件"),
         BotCommand(command="cleanup", description="将下载文件夹的所有文件移动到归档文件夹")
     ])
@@ -996,6 +1146,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("quota", handle_quota))
+    app.add_handler(CommandHandler("task_status", handle_task_status))
     app.add_handler(CommandHandler("organize_videos", handle_organize_videos))
     app.add_handler(CommandHandler("cleanup", handle_cleanup))
     app.add_handler(CommandHandler("set_download_folder", set_download_folder))
