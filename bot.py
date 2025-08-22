@@ -3,13 +3,39 @@ import configparser
 import sys
 import time
 import random
-import httpx
 import aiohttp
 import logging
 import traceback
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler, filters,
                           ContextTypes, ConversationHandler, CallbackQueryHandler)
+
+# 添加：使用 aiohttp 的轻量级适配器，保持现有调用风格
+class _ResponseAdapter:
+    def __init__(self, json_data):
+        self._json_data = json_data
+    def json(self):
+        return self._json_data
+
+class AioHttpClient:
+    def __init__(self, headers=None, timeout=20):
+        self._headers = headers or {}
+        self._timeout = aiohttp.ClientTimeout(total=timeout)
+        self._session = None
+    async def __aenter__(self):
+        self._session = aiohttp.ClientSession(headers=self._headers, timeout=self._timeout)
+        return self
+    async def __aexit__(self, exc_type, exc, tb):
+        if self._session is not None:
+            await self._session.close()
+    async def get(self, url, params=None):
+        async with self._session.get(url, params=params) as resp:
+            data = await resp.json()
+            return _ResponseAdapter(data)
+    async def post(self, url, data=None):
+        async with self._session.post(url, data=data) as resp:
+            data = await resp.json()
+            return _ResponseAdapter(data)
 
 # 修改：明确指定日志文件路径
 LOG_FILE = os.path.join(os.path.dirname(__file__), 'bot.log')
@@ -492,7 +518,7 @@ async def handle_organize_videos(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(headers=headers, timeout=20) as client:
+    async with AioHttpClient(headers=headers, timeout=20) as client:
         try:
             # 第一步：创建新文件夹
             folder_id, folder_name = await create_folder(client, download_folder_id)
@@ -737,7 +763,7 @@ async def show_folder_selection(update, context, current_cid="0", page=0, select
         return
 
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(headers=headers, timeout=20) as client:
+    async with AioHttpClient(headers=headers, timeout=20) as client:
         try:
             # 获取文件夹列表（API获取所有，然后分页显示）
             all_folders, total_count = await list_folders_only(client, current_cid, 0, 1150)
@@ -845,7 +871,7 @@ async def handle_folder_callback(update: Update, context: ContextTypes.DEFAULT_T
             folder_fid = parts[3]  # 文件夹的fid
 
             headers = {"Authorization": f"Bearer {access_token}"}
-            async with httpx.AsyncClient(headers=headers, timeout=20) as client:
+            async with AioHttpClient(headers=headers, timeout=20) as client:
                 folder_path = await get_folder_path(client, folder_fid)
 
                 if selection_type == "download":
@@ -898,11 +924,11 @@ async def handle_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+    async with AioHttpClient(headers=headers, timeout=30) as client:
         try:
             await update.message.reply_text("🔄 开始清理操作...")
             await update.message.reply_text(f"📁 下载文件夹：{download_folder_path}")
-            await update.message.reply_text(f"� 归档文件夹：{archive_folder_path}")
+            await update.message.reply_text(f" 归档文件夹：{archive_folder_path}")
 
             # 获取下载文件夹下的所有文件和文件夹
             await update.message.reply_text("📋 正在获取文件列表...")
@@ -1035,7 +1061,7 @@ async def handle_task_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+    async with AioHttpClient(headers=headers, timeout=30) as client:
         try:
             await update.message.reply_text("🔄 正在获取云下载任务状态...")
 
@@ -1130,6 +1156,12 @@ async def setup_commands(app):
 
 def main():
     logging.info("Executing: main")
+    try:
+        import uvloop  # type: ignore
+        uvloop.install()
+        logging.info("uvloop installed")
+    except Exception:
+        logging.info("uvloop not available, using default asyncio loop")
     token = get_bot_token()
     app = ApplicationBuilder().token(token).post_init(setup_commands).build()
 

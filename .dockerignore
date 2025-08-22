@@ -1,0 +1,15 @@
+bot.log
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+config.ini
+.git
+.github
+.gitignore
+.vscode
+.idea
+node_modules
+*.log
