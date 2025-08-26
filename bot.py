@@ -902,7 +902,7 @@ async def handle_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await update.message.reply_text("🔄 开始清理操作...")
             await update.message.reply_text(f"📁 下载文件夹：{download_folder_path}")
-            await update.message.reply_text(f"� 归档文件夹：{archive_folder_path}")
+            await update.message.reply_text(f"📁 归档文件夹：{archive_folder_path}")
 
             # 获取下载文件夹下的所有文件和文件夹
             await update.message.reply_text("📋 正在获取文件列表...")
