@@ -7,6 +7,7 @@ import httpx
 import aiohttp
 import logging
 import traceback
+import re
 from telegram import Update, Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler, filters,
                           ContextTypes, ConversationHandler, CallbackQueryHandler)
@@ -908,62 +909,68 @@ async def handle_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"📁 下载文件夹：{download_folder_path}")
             await update.message.reply_text(f"📁 归档文件夹：{archive_folder_path}")
 
-            # 获取下载文件夹下的所有文件和文件夹
-            await update.message.reply_text("📋 正在获取文件列表...")
-            all_items = await list_all_items(client, download_folder_id)
+            # 获取下载文件夹下的视频文件（type=4 表示视频）
+            await update.message.reply_text("📋 正在获取视频文件列表...")
+            video_files = await list_files(client, download_folder_id, file_type=4)
 
-            # 收集需要移动的项目
-            items_to_move = []
-            moved_items_info = []
-
-            for item in all_items:
-                item_id = item.get("fid") or item.get("cid")
-                item_name = item.get("fn", "未知文件名")
-
-                if item_id:
-                    items_to_move.append(item_id)
-                    moved_items_info.append({
-                        "name": item_name,
-                        "type": "文件夹" if item.get("cid") else "文件",
-                        "size": int(item.get("fs", 0)) if item.get("fs") else 0
-                    })
-
-            if not items_to_move:
-                await update.message.reply_text("✅ 下载文件夹已经是空的，无需清理。")
+            if not video_files:
+                await update.message.reply_text("✅ 下载文件夹没有视频文件需要移动。")
                 return
 
-            await update.message.reply_text(f"📦 找到 {len(items_to_move)} 个项目需要移动到归档目录...")
+            # 辅助函数：查找 archive 下最新的 group_xxx 文件夹，若无则创建 group_1
+            async def find_or_create_latest_group_folder(client, archive_cid):
+                folders, _ = await list_folders_only(client, archive_cid)
+                max_n = 0
+                max_folder = None
+                for f in folders:
+                    name = f.get("fn", "")
+                    # 支持 group_1, group_01, group_001 等格式，取出数字部分
+                    m = re.match(r"group_(0*)(\d+)$", name)
+                    if m:
+                        # 数字在第二个分组
+                        n = int(m.group(2))
+                        if n > max_n:
+                            max_n = n
+                            max_folder = f
 
-            # 移动所有文件和文件夹到归档目录
-            await move_files(client, items_to_move, archive_folder_id)
-            logging.info(f"已移动 {len(items_to_move)} 个项目到归档目录")
+                if max_folder:
+                    return max_folder.get("fid"), max_folder.get("fn"), max_n
 
-            # 发送清理结果
-            result_text = "🎉 清理操作完成！\n\n"
-            result_text += f"📁 下载文件夹：{download_folder_path}\n"
-            result_text += f"📦 归档文件夹：{archive_folder_path}\n"
-            result_text += f"📦 移动项目数：{len(moved_items_info)}\n\n"
-            result_text += "移动的项目详情：\n"
+                # 未找到，创建 group_001
+                folder_id, folder_name = await create_folder_with_name(client, archive_cid, "group_001")
+                return folder_id, folder_name, 1
 
-            for i, item in enumerate(moved_items_info[:20], 1):  # 最多显示前20个
-                size_info = ""
-                if item["size"] > 0:
-                    size_mb = item["size"] / (1024 * 1024)
-                    if size_mb >= 1:
-                        size_info = f" ({size_mb:.1f} MB)"
-                    else:
-                        size_info = f" ({item['size']} B)"
+            # 找到或创建当前目标 group 文件夹
+            current_folder_id, current_folder_name, current_index = await find_or_create_latest_group_folder(client, archive_folder_id)
 
-                result_text += f"{i}. {item['type']}: {item['name']}{size_info}\n"
+            # 计算当前文件夹中的文件数量（仅统计文件，不包括子文件夹）
+            current_items = await list_all_items(client, current_folder_id)
+            current_count = sum(1 for it in current_items if str(it.get("fc")) == "1")
 
-            if len(moved_items_info) > 20:
-                result_text += f"... 还有 {len(moved_items_info) - 20} 个项目\n"
+            # 按需移动视频文件，确保每个 group_xxx 目录最多 200 个文件
+            remaining = [f for f in video_files if f.get("fid")]
+            moved_total = 0
 
-            # 记录移动的项目详情到日志中
-            for item in moved_items_info:
-                logging.info(f"移动的{item['type']}: {item['name']}, 大小: {item['size']} 字节")
+            while remaining:
+                space = 200 - current_count
+                if space <= 0:
+                    # 创建下一个 group
+                    current_index += 1
+                    new_name = f"group_{current_index:03d}"
+                    current_folder_id, created_name = await create_folder_with_name(client, archive_folder_id, new_name)
+                    current_count = 0
+                    space = 200
 
-            await send_long_message(update, context, result_text)
+                to_move = remaining[:space]
+                ids = [vf["fid"] for vf in to_move]
+                if ids:
+                    await move_files(client, ids, current_folder_id)
+                    moved_total += len(ids)
+                    current_count += len(ids)
+                remaining = remaining[len(ids):]
+
+            logging.info(f"已移动 {moved_total} 个视频文件到归档目录")
+            await update.message.reply_text(f"✅ 已移动 {moved_total} 个视频文件到归档目录。")
 
         except Exception as e:
             logging.error(f"清理操作失败: {e}")
