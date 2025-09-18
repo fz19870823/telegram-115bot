@@ -970,7 +970,16 @@ async def handle_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 remaining = remaining[len(ids):]
 
             logging.info(f"已移动 {moved_total} 个视频文件到归档目录")
-            await update.message.reply_text(f"✅ 已移动 {moved_total} 个视频文件到归档目录。")
+            await update.message.reply_text(f"✅ 已移动 {moved_total} 个视频文件到归档目录。\n开始清空下载目录...")
+
+            # 清空下载目录（不排除任何文件/文件夹）
+            try:
+                delete_ids, deleted_names = await delete_files(client, download_folder_id, exclude_ids=set())
+                logging.info(f"已删除下载目录下 {len(delete_ids)} 个项目，名称: {', '.join(deleted_names[:10])}")
+                await update.message.reply_text(f"🗑️ 已清空下载目录，删除 {len(delete_ids)} 个项目。")
+            except Exception as e:
+                logging.error(f"清空下载目录失败: {e}")
+                await update.message.reply_text(f"⚠️ 清空下载目录失败: {e}")
 
         except Exception as e:
             logging.error(f"清理操作失败: {e}")
