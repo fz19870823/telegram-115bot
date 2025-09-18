@@ -2,7 +2,7 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "test" ]
   workflow_dispatch:
 
 jobs:
@@ -19,15 +19,18 @@ jobs:
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
     - name: Fetch all tags
+      if: github.ref == 'refs/heads/main'
       run: git fetch --tags
 
     - name: Get latest tag
+      if: github.ref == 'refs/heads/main'
       id: get_tag
       run: |
         tag=$(git tag --sort=-v:refname | head -n 1)
         echo "latest_tag=$tag" >> $GITHUB_OUTPUT
 
     - name: Calculate new tag
+      if: github.ref == 'refs/heads/main'
       id: new_tag
       run: |
         latest=${{ steps.get_tag.outputs.latest_tag }}
@@ -43,6 +46,7 @@ jobs:
         echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
 
     - name: Create and push new tag
+      if: github.ref == 'refs/heads/main'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
@@ -55,7 +59,8 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build and push Docker image
+    - name: Build and push Docker image (main)
+      if: github.ref == 'refs/heads/main'
       uses: docker/build-push-action@v5
       with:
         context: .
@@ -63,3 +68,12 @@ jobs:
         tags: |
           fz19870823190/telegram-115bot:latest
           fz19870823190/telegram-115bot:${{ steps.new_tag.outputs.new_tag }}
+
+    - name: Build and push Docker image (test - beta)
+      if: github.ref == 'refs/heads/test'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          fz19870823190/telegram-115bot:beta

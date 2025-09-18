@@ -6,7 +6,7 @@
 
 ## 📁 文件结构
 
-```
+```text
 project-root/
 ├── docker-compose.yml        # Docker Compose 配置文件
 ├── config.ini                # 你的 Telegram Bot 配置文件
@@ -86,7 +86,10 @@ docker-compose up -d
 
 ## 🛠️ `worker.js`：获取 115 网盘刷新令牌网页
 
-`worker.js` 是一个轻量网页服务，用于用户手动登录并获取 115 网盘的 `refresh_token`。**你可以将该文件部署在任意支持 JavaScript 的 Web 平台（如 Cloudflare Workers）上。**
+`worker.js` 是一个轻量网页服务，用于用户手动登录并获取 115 网盘的 `refresh_token`。
+
+你可以将该文件部署在任意支持 JavaScript 的 Web 平台上，
+例如 [Cloudflare Workers](https://workers.cloudflare.com/)。
 
 ### ✨ 使用方式
 
@@ -99,10 +102,9 @@ docker-compose up -d
 
 如果你不想自行部署，也可以使用作者已搭建的演示网页：
 
-🔗 [https://115token.fzserver.top](https://115token.fzserver.top)
+🔗 [演示页面](https://115token.fzserver.top)
 
 > ⚠️ 该页面每日限制请求次数为 10 万次，请勿频繁刷新。
-
 
 ---
 
@@ -114,7 +116,28 @@ docker-compose up -d
 
 ---
 
-# 📄 config.ini 配置说明
+## 🔧 可选环境变量：自定义 Telegram API 基址
+
+如果你使用私人搭建的反向代理或自定义的 Telegram API 入口，可以通过环境变量覆盖默认的 Telegram API 基址：
+
+- 环境变量名：`TELEGRAM_API_BASE_URL` 或 `TELEGRAM_API_URL`
+- 示例值：`https://my.telegram.proxy`（不带尾部斜杠）
+
+在 Docker Compose 中使用示例：
+
+```yaml
+services:
+  telegram-bot:
+    image: fz19870823190/telegram-115bot
+    environment:
+      - TELEGRAM_API_BASE_URL=https://my.telegram.proxy
+    # ... 其他配置
+```
+
+代码会在启动时检测该环境变量并将其传递给 Telegram 客户端库，
+日志中会记录所使用的基址，方便排查。
+
+## 📄 config.ini 配置说明
 
 该文件用于配置 Telegram 115 Bot 的基本参数。
 
@@ -133,7 +156,8 @@ token = YOUR_BOT_TOKEN_HERE
 
 | 参数名 | 描述 |
 |--------|------|
-| `token` | Telegram Bot 的访问令牌（从 BotFather 获取）。将 `YOUR_BOT_TOKEN_HERE` 替换为你自己的 token。 |
+| `token` | Telegram Bot 的访问令牌（从 BotFather 获取）。 |
+|         | 请将 `YOUR_BOT_TOKEN_HERE` 替换为你自己的 token。 |
 
 ---
 

@@ -7,7 +7,7 @@ import httpx
 import aiohttp
 import logging
 import traceback
-from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler, filters,
                           ContextTypes, ConversationHandler, CallbackQueryHandler)
 
@@ -31,6 +31,10 @@ ASK_CID = 2  # 新增CID请求状态
 
 API_REFRESH_URL = "https://passportapi.115.com/open/refreshToken"
 API_ADD_TASK_URL = "https://proapi.115.com/open/offline/add_task_urls"
+
+# 可通过环境变量覆盖 Telegram API 基址，方便使用私有反向代理
+# 示例: https://my.telegram.proxy
+TELEGRAM_API_BASE_URL = os.environ.get('TELEGRAM_API_BASE_URL') or os.environ.get('TELEGRAM_API_URL')
 
 def get_bot_token():
     logging.info("Executing: get_bot_token")
@@ -1131,7 +1135,13 @@ async def setup_commands(app):
 def main():
     logging.info("Executing: main")
     token = get_bot_token()
-    app = ApplicationBuilder().token(token).post_init(setup_commands).build()
+    # 如果设置了 TELEGRAM_API_BASE_URL，则将其作为 base_url 传入 ApplicationBuilder
+    if TELEGRAM_API_BASE_URL:
+        logging.info(f"使用自定义 Telegram API 基址: {TELEGRAM_API_BASE_URL}")
+        app = ApplicationBuilder().token(token).base_url(TELEGRAM_API_BASE_URL).post_init(setup_commands).build()
+    else:
+        logging.info("使用默认的 Telegram API 基址")
+        app = ApplicationBuilder().token(token).post_init(setup_commands).build()
 
     conv_handler = ConversationHandler(
         entry_points=[
