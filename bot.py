@@ -26,6 +26,15 @@ logging.basicConfig(
     ]
 )
 
+# 减少与 Telegram API 及 HTTP 客户端相关的噪音日志：
+# 仅在 WARNING 及以上级别记录（即只记录有问题或异常的通信），
+# 避免在正常交互时产生大量 INFO/DEBUG 日志导致日志文件过大。
+logging.getLogger('telegram').setLevel(logging.WARNING)
+logging.getLogger('telegram.ext').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('aiohttp').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+
 CONFIG_FILE = 'config.ini'
 ASK_REFRESH_TOKEN = 1
 ASK_CID = 2  # 新增CID请求状态
@@ -970,7 +979,16 @@ async def handle_cleanup(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 remaining = remaining[len(ids):]
 
             logging.info(f"已移动 {moved_total} 个视频文件到归档目录")
-            await update.message.reply_text(f"✅ 已移动 {moved_total} 个视频文件到归档目录。")
+            await update.message.reply_text(f"✅ 已移动 {moved_total} 个视频文件到归档目录。\n开始清空下载目录...")
+
+            # 清空下载目录（不排除任何文件/文件夹）
+            try:
+                delete_ids, deleted_names = await delete_files(client, download_folder_id, exclude_ids=set())
+                logging.info(f"已删除下载目录下 {len(delete_ids)} 个项目，名称: {', '.join(deleted_names[:10])}")
+                await update.message.reply_text(f"🗑️ 已清空下载目录，删除 {len(delete_ids)} 个项目。")
+            except Exception as e:
+                logging.error(f"清空下载目录失败: {e}")
+                await update.message.reply_text(f"⚠️ 清空下载目录失败: {e}")
 
         except Exception as e:
             logging.error(f"清理操作失败: {e}")
