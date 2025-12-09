@@ -26,6 +26,15 @@ logging.basicConfig(
     ]
 )
 
+# 减少与 Telegram API 及 HTTP 客户端相关的噪音日志：
+# 仅在 WARNING 及以上级别记录（即只记录有问题或异常的通信），
+# 避免在正常交互时产生大量 INFO/DEBUG 日志导致日志文件过大。
+logging.getLogger('telegram').setLevel(logging.WARNING)
+logging.getLogger('telegram.ext').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('aiohttp').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+
 CONFIG_FILE = 'config.ini'
 ASK_REFRESH_TOKEN = 1
 ASK_CID = 2  # 新增CID请求状态
