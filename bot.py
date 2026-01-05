@@ -8,9 +8,9 @@ import aiohttp
 import logging
 import traceback
 import re
-from telegram import Update, Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, ChatMemberUpdated, ChatMember
 from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler, filters,
-                          ContextTypes, ConversationHandler, CallbackQueryHandler)
+                          ContextTypes, ConversationHandler, CallbackQueryHandler, ChatMemberHandler)
 
 # 修改：明确指定日志文件路径
 LOG_FILE = os.path.join(os.path.dirname(__file__), 'bot.log')
@@ -237,12 +237,30 @@ async def add_cloud_download_task(access_token, urls, wp_path_id="0"):
 async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info("Executing: handle_add_task")
     try:
+        # 检查是否是私聊或者明确@机器人
+        if update.message.chat.type != "private":
+            bot_username = context.bot.username
+            message_text = update.message.text.strip()
+            
+            # 确保消息中包含@机器人
+            if not (bot_username and f"@{bot_username}" in message_text):
+                logging.info(f"忽略群组消息，未明确@机器人: {message_text}")
+                return
+            
+        # 提取消息内容，去除@机器人的部分
+        message_text = update.message.text.strip()
+        bot_username = context.bot.username
+        
+        # 如果消息中包含@机器人，去除这部分
+        if bot_username and f"@{bot_username}" in message_text:
+            message_text = re.sub(f"@{bot_username}\\s*", "", message_text)
+        
         user_id = str(update.effective_user.id)
         access_token = await check_and_get_access_token(user_id, context)
         if not access_token:
             return
 
-        links = extract_links(update.message.text.strip())
+        links = extract_links(message_text)
         if not links:
             await update.message.reply_text("未检测到有效的下载链接，请发送支持的磁力链（magnet）或电驴链接（ed2k）。")
             return
@@ -1143,6 +1161,32 @@ async def handle_task_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
             logging.error(f"获取任务状态失败: {e}")
             await update.message.reply_text(f"❌ 获取任务状态失败：{e}")
 
+async def on_chat_member_updated(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理群组加入事件，当机器人被添加到群组时，提示管理员设置机器人为管理员"""
+    logging.info("Executing: on_chat_member_updated")
+    chat_member = update.chat_member
+    if chat_member.new_chat_member.user.id == context.bot.id:
+        # 机器人被添加到群组
+        chat = chat_member.chat
+        logging.info(f"机器人被添加到群组: {chat.title} (ID: {chat.id})")
+        
+        # 发送提示消息给群组管理员
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text="感谢将我添加到群组！为了正常工作，请将我设置为管理员权限。\n\n" +
+                 "我支持以下命令：\n" +
+                 "/start - 开始与机器人交互\n" +
+                 "/set_refresh_token - 设置 115 的 refresh_token\n" +
+                 "/set_download_folder - 设置下载文件夹\n" +
+                 "/set_archive_folder - 设置归档文件夹\n" +
+                 "/status - 查看用户状态信息\n" +
+                 "/quota - 查看离线任务配额信息\n" +
+                 "/task_status - 查看未完成的云下载任务状态\n" +
+                 "/organize_videos - 整理视频文件\n" +
+                 "/cleanup - 将下载文件夹的所有文件移动到归档文件夹\n\n" +
+                 "在群组中使用命令时，请确保我能接收到您的消息（可以@我或直接使用命令）。"
+        )
+
 async def setup_commands(app):
     logging.info("Executing: setup_commands")
     await app.bot.set_my_commands([
@@ -1188,7 +1232,15 @@ def main():
     app.add_handler(CommandHandler("set_archive_folder", set_archive_folder))
     app.add_handler(CallbackQueryHandler(handle_folder_callback))  # 处理文件夹选择回调
     app.add_handler(conv_handler)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_task))
+    app.add_handler(ChatMemberHandler(on_chat_member_updated, ChatMemberHandler.CHAT_MEMBER))
+    # 只处理私聊消息或者被@的消息
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & (
+            filters.ChatType.PRIVATE | 
+            filters.Entity(filters.Entity.MENTION)  # 包含@提及的消息
+        ),
+        handle_add_task
+    ))
 
     app.run_polling()
 
