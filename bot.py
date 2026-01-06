@@ -1163,21 +1163,37 @@ async def setup_commands(app):
 async def handle_http_add_task(request):
     """
     处理HTTP POST请求，接收JSON数据并提交下载任务
-    JSON格式: {"user_id": "123456", "url": "magnet:?xt=..."}
+    支持单个任务和批量任务提交
+    
+    单个任务格式: {"user_id": "123456", "url": "magnet:?xt=..."}
+    批量任务格式: {"user_id": "123456", "urls": ["magnet:?xt=...", "ed2k://..."]}
     """
     try:
         data = await request.json()
         
         user_id = data.get("user_id")
-        url = data.get("url")
         
-        if not user_id or not url:
+        if not user_id:
             return web.json_response(
-                {"success": False, "message": "缺少必要参数: user_id 或 url"},
+                {"success": False, "message": "缺少必要参数: user_id"},
                 status=400
             )
         
-        logging.info(f"收到HTTP请求 - 用户ID: {user_id}, URL: {url}")
+        url = data.get("url")
+        urls = data.get("urls")
+        
+        if not url and not urls:
+            return web.json_response(
+                {"success": False, "message": "缺少必要参数: url 或 urls"},
+                status=400
+            )
+        
+        if url:
+            urls_list = [url]
+        else:
+            urls_list = urls if isinstance(urls, list) else [urls]
+        
+        logging.info(f"收到HTTP请求 - 用户ID: {user_id}, 任务数: {len(urls_list)}")
         
         tokens = load_user_tokens(user_id)
         if not tokens or not tokens.get("refresh_token"):
@@ -1206,7 +1222,7 @@ async def handle_http_add_task(request):
                 status=400
             )
         
-        success, result = await add_cloud_download_task(access_token, [url], download_folder_id)
+        success, result = await add_cloud_download_task(access_token, urls_list, download_folder_id)
         
         if success:
             tasks = result.get("data", [])
@@ -1216,23 +1232,49 @@ async def handle_http_add_task(request):
                     status=500
                 )
             
-            task = tasks[0]
-            if task.get("state", False):
+            success_count = sum(1 for task in tasks if task.get("state", False))
+            failed_tasks = [task for task in tasks if not task.get("state", False)]
+            
+            if success_count == len(tasks):
                 return web.json_response({
                     "success": True,
-                    "message": "任务添加成功",
+                    "message": f"成功添加 {success_count} 个任务",
                     "data": {
-                        "task_id": task.get("info_hash"),
-                        "task_name": task.get("name"),
-                        "task_size": task.get("size")
+                        "total": success_count,
+                        "success": success_count,
+                        "failed": 0,
+                        "tasks": [
+                            {
+                                "task_id": task.get("info_hash"),
+                                "task_name": task.get("name"),
+                                "task_size": task.get("size"),
+                                "url": task.get("url")
+                            }
+                            for task in tasks
+                        ]
                     }
                 })
             else:
-                error_msg = task.get("message", "未知错误")
-                return web.json_response(
-                    {"success": False, "message": f"任务添加失败: {error_msg}"},
-                    status=500
-                )
+                return web.json_response({
+                    "success": True,
+                    "message": f"部分成功: {success_count} 个成功, {len(failed_tasks)} 个失败",
+                    "data": {
+                        "total": len(tasks),
+                        "success": success_count,
+                        "failed": len(failed_tasks),
+                        "tasks": [
+                            {
+                                "task_id": task.get("info_hash"),
+                                "task_name": task.get("name"),
+                                "task_size": task.get("size"),
+                                "url": task.get("url"),
+                                "state": task.get("state", False),
+                                "error": task.get("message") if not task.get("state", False) else None
+                            }
+                            for task in tasks
+                        ]
+                    }
+                })
         else:
             error_msg = result.get("message") or result.get("error") or "添加任务失败"
             return web.json_response(
