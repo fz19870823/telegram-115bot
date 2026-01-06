@@ -1,13 +1,16 @@
-import os  
+import os
 import configparser
 import sys
 import time
 import random
 import httpx
 import aiohttp
+from aiohttp import web
 import logging
 import traceback
 import re
+import json
+import asyncio
 from telegram import Update, Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler, filters,
                           ContextTypes, ConversationHandler, CallbackQueryHandler)
@@ -1157,10 +1160,116 @@ async def setup_commands(app):
         BotCommand(command="cleanup", description="将下载文件夹的所有文件移动到归档文件夹")
     ])
 
+async def handle_http_add_task(request):
+    """
+    处理HTTP POST请求，接收JSON数据并提交下载任务
+    JSON格式: {"user_id": "123456", "url": "magnet:?xt=..."}
+    """
+    try:
+        data = await request.json()
+        
+        user_id = data.get("user_id")
+        url = data.get("url")
+        
+        if not user_id or not url:
+            return web.json_response(
+                {"success": False, "message": "缺少必要参数: user_id 或 url"},
+                status=400
+            )
+        
+        logging.info(f"收到HTTP请求 - 用户ID: {user_id}, URL: {url}")
+        
+        tokens = load_user_tokens(user_id)
+        if not tokens or not tokens.get("refresh_token"):
+            return web.json_response(
+                {"success": False, "message": "用户未配置 refresh_token"},
+                status=400
+            )
+        
+        access_token = tokens.get("access_token")
+        now = int(time.time())
+        
+        if not access_token or tokens.get("access_token_expire_at", 0) <= now:
+            data_token, err = await refresh_access_token(tokens["refresh_token"])
+            if err:
+                return web.json_response(
+                    {"success": False, "message": f"刷新access_token失败: {err}"},
+                    status=500
+                )
+            save_user_tokens(user_id, data_token['access_token'], data_token['refresh_token'], data_token['expires_in'])
+            access_token = data_token['access_token']
+        
+        download_folder_id, _ = load_user_download_folder(user_id)
+        if not download_folder_id:
+            return web.json_response(
+                {"success": False, "message": "用户未设置下载文件夹"},
+                status=400
+            )
+        
+        success, result = await add_cloud_download_task(access_token, [url], download_folder_id)
+        
+        if success:
+            tasks = result.get("data", [])
+            if not tasks:
+                return web.json_response(
+                    {"success": False, "message": "未检测到任何任务信息"},
+                    status=500
+                )
+            
+            task = tasks[0]
+            if task.get("state", False):
+                return web.json_response({
+                    "success": True,
+                    "message": "任务添加成功",
+                    "data": {
+                        "task_id": task.get("info_hash"),
+                        "task_name": task.get("name"),
+                        "task_size": task.get("size")
+                    }
+                })
+            else:
+                error_msg = task.get("message", "未知错误")
+                return web.json_response(
+                    {"success": False, "message": f"任务添加失败: {error_msg}"},
+                    status=500
+                )
+        else:
+            error_msg = result.get("message") or result.get("error") or "添加任务失败"
+            return web.json_response(
+                {"success": False, "message": error_msg},
+                status=500
+            )
+    
+    except json.JSONDecodeError:
+        return web.json_response(
+            {"success": False, "message": "无效的JSON格式"},
+            status=400
+        )
+    except Exception as e:
+        logging.error(f"处理HTTP请求时发生异常: {e}\n{traceback.format_exc()}")
+        return web.json_response(
+            {"success": False, "message": f"服务器内部错误: {str(e)}"},
+            status=500
+        )
+
+async def start_http_server():
+    """
+    启动HTTP服务器，监听端口23333
+    """
+    app = web.Application()
+    app.router.add_post('/', handle_http_add_task)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 23333)
+    await site.start()
+    logging.info("HTTP服务器已启动，监听端口 23333")
+    return runner
+
 def main():
     logging.info("Executing: main")
     token = get_bot_token()
-    # 如果设置了 TELEGRAM_API_BASE_URL，则将其作为 base_url 传入 ApplicationBuilder
+    
     if TELEGRAM_API_BASE_URL:
         logging.info(f"使用自定义 Telegram API 基址: {TELEGRAM_API_BASE_URL}")
         app = ApplicationBuilder().token(token).base_url(TELEGRAM_API_BASE_URL).post_init(setup_commands).build()
@@ -1186,11 +1295,29 @@ def main():
     app.add_handler(CommandHandler("cleanup", handle_cleanup))
     app.add_handler(CommandHandler("set_download_folder", set_download_folder))
     app.add_handler(CommandHandler("set_archive_folder", set_archive_folder))
-    app.add_handler(CallbackQueryHandler(handle_folder_callback))  # 处理文件夹选择回调
+    app.add_handler(CallbackQueryHandler(handle_folder_callback))
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_task))
 
-    app.run_polling()
+    async def run_all():
+        http_runner = await start_http_server()
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling()
+        
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            logging.info("收到中断信号，正在关闭服务...")
+        finally:
+            await app.updater.stop()
+            await app.stop()
+            await app.shutdown()
+            await http_runner.cleanup()
+            logging.info("所有服务已关闭")
+    
+    asyncio.run(run_all())
 
 if __name__ == '__main__':
     main()
