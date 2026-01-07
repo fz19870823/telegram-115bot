@@ -218,24 +218,35 @@ async def add_cloud_download_task(access_token, urls, wp_path_id="0"):
     headers = {
         "Authorization": f"Bearer {access_token}"
     }
+    
+    logging.info(f"提交任务到115 API - URL数量: {len(urls)}, 文件夹ID: {wp_path_id}")
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(API_ADD_TASK_URL, data=payload, headers=headers) as resp:
+                logging.info(f"115 API响应状态码: {resp.status}")
+                
                 if resp.status != 200:
-                    # 修改：返回完整的响应内容
-                    resp_json = await resp.json()
+                    resp_text = await resp.text()
+                    logging.error(f"115 API返回非200状态码: {resp.status}, 响应内容: {resp_text}")
+                    try:
+                        resp_json = await resp.json()
+                    except:
+                        resp_json = {"error": f"响应解析失败: {resp_text}"}
                     return False, resp_json
                 
-                resp_json = await resp.json()  # 仅调用一次
+                resp_json = await resp.json()
+                logging.info(f"115 API响应内容: {resp_json}")
+                
                 if resp_json.get("state") is True and resp_json.get("code") == 0:
                     return True, resp_json
                 else:
-                    # 修改：返回完整的响应内容
+                    error_msg = resp_json.get("message") or resp_json.get("error") or "未知错误"
+                    logging.error(f"115 API返回错误: {error_msg}, 完整响应: {resp_json}")
                     return False, resp_json
-    except Exception:
-        logging.error(f"添加任务时发生异常:\n{traceback.format_exc()}")
-        return False, {"error": "请求过程中发生异常"}
+    except Exception as e:
+        logging.error(f"添加任务时发生异常: {e}\n堆栈信息:\n{traceback.format_exc()}")
+        return False, {"error": f"请求过程中发生异常: {str(e)}"}
 
 async def handle_add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info("Executing: handle_add_task")
