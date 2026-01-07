@@ -1288,9 +1288,13 @@ async def handle_http_add_task(request):
                 })
         else:
             error_msg = result.get("message") or result.get("error") or "添加任务失败"
+            error_code = result.get("code", 0)
+            
+            logging.info(f"任务添加失败 - 错误码: {error_code}, 错误信息: {error_msg}")
+            
             return web.json_response(
-                {"success": False, "message": error_msg},
-                status=500
+                {"success": False, "message": error_msg, "code": error_code},
+                status=400
             )
     
     except json.JSONDecodeError:
