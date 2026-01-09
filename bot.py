@@ -1171,7 +1171,7 @@ async def setup_commands(app):
         BotCommand(command="cleanup", description="将下载文件夹的所有文件移动到归档文件夹")
     ])
 
-async def handle_http_add_task(request):
+async def handle_http_add_task(request, bot):
     """
     处理HTTP POST请求，接收JSON数据并提交下载任务
     支持单个任务和批量任务提交
@@ -1208,6 +1208,7 @@ async def handle_http_add_task(request):
         
         tokens = load_user_tokens(user_id)
         if not tokens or not tokens.get("refresh_token"):
+            await bot.send_message(chat_id=user_id, text="❌ HTTP API请求失败：用户未配置 refresh_token")
             return web.json_response(
                 {"success": False, "message": "用户未配置 refresh_token"},
                 status=400
@@ -1219,6 +1220,7 @@ async def handle_http_add_task(request):
         if not access_token or tokens.get("access_token_expire_at", 0) <= now:
             data_token, err = await refresh_access_token(tokens["refresh_token"])
             if err:
+                await bot.send_message(chat_id=user_id, text=f"❌ HTTP API请求失败：刷新access_token失败 - {err}")
                 return web.json_response(
                     {"success": False, "message": f"刷新access_token失败: {err}"},
                     status=500
@@ -1226,8 +1228,9 @@ async def handle_http_add_task(request):
             save_user_tokens(user_id, data_token['access_token'], data_token['refresh_token'], data_token['expires_in'])
             access_token = data_token['access_token']
         
-        download_folder_id, _ = load_user_download_folder(user_id)
+        download_folder_id, download_folder_path = load_user_download_folder(user_id)
         if not download_folder_id:
+            await bot.send_message(chat_id=user_id, text="❌ HTTP API请求失败：用户未设置下载文件夹")
             return web.json_response(
                 {"success": False, "message": "用户未设置下载文件夹"},
                 status=400
@@ -1238,6 +1241,7 @@ async def handle_http_add_task(request):
         if success:
             tasks = result.get("data", [])
             if not tasks:
+                await bot.send_message(chat_id=user_id, text="❌ HTTP API请求失败：未检测到任何任务信息")
                 return web.json_response(
                     {"success": False, "message": "未检测到任何任务信息"},
                     status=500
@@ -1247,6 +1251,18 @@ async def handle_http_add_task(request):
             failed_tasks = [task for task in tasks if not task.get("state", False)]
             
             if success_count == len(tasks):
+                message = f"📥 HTTP API提交任务成功\n\n"
+                message += f"✅ 成功添加 {success_count} 个任务\n"
+                message += f"📁 下载文件夹: {download_folder_path or '未知'}\n\n"
+                message += "任务列表：\n"
+                for task in tasks:
+                    task_name = task.get("name", "未知")
+                    task_size = task.get("size", 0)
+                    size_mb = task_size / (1024 * 1024) if task_size > 0 else 0
+                    message += f"• {task_name} ({size_mb:.1f} MB)\n"
+                
+                await bot.send_message(chat_id=user_id, text=message)
+                
                 return web.json_response({
                     "success": True,
                     "message": f"成功添加 {success_count} 个任务",
@@ -1266,6 +1282,17 @@ async def handle_http_add_task(request):
                     }
                 })
             else:
+                message = f"📥 HTTP API提交任务（部分成功）\n\n"
+                message += f"✅ 成功: {success_count} 个\n"
+                message += f"❌ 失败: {len(failed_tasks)} 个\n\n"
+                message += "失败任务详情：\n"
+                for task in failed_tasks:
+                    task_url = task.get("url", "未知")
+                    task_error = task.get("message", "未知错误")
+                    message += f"• {task_url}\n  错误: {task_error}\n"
+                
+                await bot.send_message(chat_id=user_id, text=message)
+                
                 return web.json_response({
                     "success": True,
                     "message": f"部分成功: {success_count} 个成功, {len(failed_tasks)} 个失败",
@@ -1292,6 +1319,8 @@ async def handle_http_add_task(request):
             
             logging.info(f"任务添加失败 - 错误码: {error_code}, 错误信息: {error_msg}")
             
+            await bot.send_message(chat_id=user_id, text=f"❌ HTTP API请求失败：{error_msg}")
+            
             return web.json_response(
                 {"success": False, "message": error_msg, "code": error_code},
                 status=400
@@ -1309,12 +1338,12 @@ async def handle_http_add_task(request):
             status=500
         )
 
-async def start_http_server():
+async def start_http_server(bot):
     """
     启动HTTP服务器，监听端口23333
     """
     app = web.Application()
-    app.router.add_post('/', handle_http_add_task)
+    app.router.add_post('/', lambda request: handle_http_add_task(request, bot))
     
     runner = web.AppRunner(app)
     await runner.setup()
@@ -1357,7 +1386,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_add_task))
 
     async def run_all():
-        http_runner = await start_http_server()
+        http_runner = await start_http_server(app.bot)
         await app.initialize()
         await app.start()
         await app.updater.start_polling()
